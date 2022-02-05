@@ -34,9 +34,9 @@ void prn_test(char *xdata,float press, float temperature){
             else { 
                 printf("number: %d\n",output.instrument_number);
                 printf("pump_temp: %g\n",output.ozone_pump_temp);
-                printf("current: %g\n",output.ozone_current_uA);
-                printf("battery: %g\n",output.ozone_battery_v);
-                printf("pump_current: %g\n",output.ozone_pump_curr_mA);
+                printf("current: %g\n",output.ozone_current);
+                printf("battery: %g\n",output.ozone_battery);
+                printf("pump_current: %g\n",output.ozone_pump_curr);
                 printf("voltage: %g\n",output.ext_voltage);
                 printf("O3_pressure: %g\n",output.O3_partial_pressure);
             }
@@ -144,6 +144,16 @@ void prn_test(char *xdata,float press, float temperature){
             printf("production_year: %d\n",output.production_year);
             printf("hardware_version: %d\n",output.hardware_version);
         } 
+        else if(strcmp(instrument,"V7") == 0){          
+            output_v7 output={0};
+            parseV7(&output,data,press);
+            printf("number: %d\n",output.instrument_number);
+            printf("pump_temp: %g\n",output.ozone_pump_temp);
+            printf("current: %g\n",output.ozone_current);
+            printf("battery: %g\n",output.ozone_battery);
+            printf("pump_current: %g\n",output.ozone_pump_curr);
+            printf("O3_pressure: %g\n",output.O3_partial_pressure);
+        }
         printf("-----------------\n");    
     } 
     free(tofree);

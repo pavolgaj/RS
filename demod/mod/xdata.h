@@ -24,9 +24,9 @@ typedef struct {
     char *diagnostics;
     int version;
     float ozone_pump_temp;
-    float ozone_current_uA;
-    float ozone_battery_v;
-    float ozone_pump_curr_mA;
+    float ozone_current;
+    float ozone_battery;
+    float ozone_pump_curr;
     float ext_voltage;
     float O3_partial_pressure; 
     char *data_type;
@@ -107,6 +107,16 @@ typedef struct {
     int production_year;
     int hardware_version;
 } output_flashb;
+
+typedef struct {
+    int instrument_number;
+    int version;
+    float ozone_pump_temp;
+    float ozone_current;
+    float ozone_battery;
+    float ozone_pump_curr;
+    float O3_partial_pressure; 
+} output_v7;
 
 float alt2press(float h){
     //convert altitude (m) to pressure (hPa) based on NOAA ISA model
@@ -216,13 +226,13 @@ void parseOIF411(output_oif411 *output, char *xdata, float pressure){
         output->ozone_pump_temp = (float)ozone_pump_temp*0.01; // Degrees C (5 - 35)
         
         // Ozone Current
-        output->ozone_current_uA = ((int)strntol(xdata+8,5, NULL, 16))*0.0001; // micro-Amps (0.05 - 30)
+        output->ozone_current = ((int)strntol(xdata+8,5, NULL, 16))*0.0001; // micro-Amps (0.05 - 30)
         
         // Battery Voltage
-        output->ozone_battery_v = ((int)strntol(xdata+13,2, NULL, 16))*0.1; // Volts (14 - 19)
+        output->ozone_battery = ((int)strntol(xdata+13,2, NULL, 16))*0.1; // Volts (14 - 19)
         
         // Ozone Pump Current
-        output->ozone_pump_curr_mA = (float)((int)strntol(xdata+15,3, NULL, 16)); // mA (30 - 110)
+        output->ozone_pump_curr = (float)((int)strntol(xdata+15,3, NULL, 16)); // mA (30 - 110)
 
         // External Voltage
         output->ext_voltage = ((int)strntol(xdata+18,2, NULL, 16))*0.1; // Volts
@@ -234,7 +244,7 @@ void parseOIF411(output_oif411 *output, char *xdata, float pressure){
         float Cef = get_oif411_Cef(pressure); // Calculate the pump efficiency correction.
         float FlowRate = 28.5; // Use a 'nominal' value for Flow Rate (seconds per 100mL).
 
-        output->O3_partial_pressure = (4.30851e-4)*(output->ozone_current_uA - Ibg)*(output->ozone_pump_temp+273.15)*FlowRate*Cef; // mPa
+        output->O3_partial_pressure = (4.30851e-4)*(output->ozone_current - Ibg)*(output->ozone_pump_temp+273.15)*FlowRate*Cef; // mPa
     }   
 }
 
@@ -603,13 +613,13 @@ void parseFLASHB(output_flashb *output, char *xdata, float pressure, float tempe
 
     output->photomultiplier_counts = calculateFLASHBWaterVapour(photomultiplier_counts, output->photomultiplier_background_counts, pressure, temperature);
 
-    output->photomultiplier_temperature = (-21.103*log(((int)strntol(xdata+13,4, NULL, 16)*0.0183)/(2.49856 - ((int)strntol(xdata+13,4, NULL, 16)*0.00061)))) + 97.106;
+    output->photomultiplier_temperature = (-21.103*log(((int)strntol(xdata+13,4, NULL, 16)*0.0183)/(2.49856 - ((int)strntol(xdata+13,4, NULL, 16)*0.00061)))) + 97.106;  // deg C
 
-    output->battery_voltage = (int)strntol(xdata+17,4, NULL, 16)*0.005185;
+    output->battery_voltage = (int)strntol(xdata+17,4, NULL, 16)*0.005185; // V
 
-    output->yuv_current = (int)strntol(xdata+21,4, NULL, 16)*0.0101688;
+    output->yuv_current = (int)strntol(xdata+21,4, NULL, 16)*0.0101688;   // mA
 
-    output->pmt_voltage = (int)strntol(xdata+25,4, NULL, 16)*0.36966;
+    output->pmt_voltage = (int)strntol(xdata+25,4, NULL, 16)*0.36966;     // V
 
     output->firmware_version = (int)strntol(xdata+29,2, NULL, 16)*0.1;
 
@@ -617,6 +627,58 @@ void parseFLASHB(output_flashb *output, char *xdata, float pressure, float tempe
     
     output->hardware_version = (int)strntol(xdata+33,2, NULL, 16);
 }
+
+void parseV7(output_v7 *output, char *xdata, float pressure) {
+    // Attempt to parse an XDATA string from an ECC Ozonesonde
+    // Returns an object with parameters to be added to the sondes telemetry.
+    //
+    // References: 
+    // https://gml.noaa.gov/aftp/user/jordan/iMet%20Radiosonde%20Protocol.pdf
+    //
+    // Sample data:      01010349FDC54296   (length = 16 characters)
+
+    // Run some checks over the input
+    int length=strlen(xdata);
+    if (length != 16){
+        // Invalid Ozonesonde dataset
+        return;
+    }
+
+    if (strncmp(xdata,"01",2) != 0){
+        // Not an Ozonesonde (shouldn't get here)
+        return;
+    }
+
+
+    // Instrument number is common to all XDATA types.
+    output->instrument_number = (int)strntol(xdata+2,2,NULL, 16);
+
+    // Cell Current
+    output->ozone_current = (int)strntol(xdata+4,4,NULL, 16)*0.001; // uA
+    
+    // Pump Temperature
+    int ozone_pump_temp = (int)strntol(xdata+8,4, NULL, 16);
+    if ((ozone_pump_temp  & 0x8000) > 0) {
+        ozone_pump_temp = ozone_pump_temp  - 0x10000;
+    }
+    output->ozone_pump_temp = (float)ozone_pump_temp*0.01; // Degrees C
+
+    // Pump Current
+    output->ozone_pump_curr = (int)strntol(xdata+12,2,NULL, 16); // mA
+
+    // Battery Voltage
+    output->ozone_battery = (int)strntol(xdata+14,2,NULL, 16)*0.1; // Volts
+
+    // Now attempt to calculate the O3 partial pressure (copy OIF411 calculations)
+    
+    float Ibg = 0.0; // The BOM appear to use a Ozone background current value of 0 uA
+    float Cef = get_oif411_Cef(pressure); // Calculate the pump efficiency correction.
+    float FlowRate = 28.5; // Use a 'nominal' value for Flow Rate (seconds per 100mL).
+
+    output->O3_partial_pressure = (4.30851e-4)*(output->ozone_current - Ibg)*(output->ozone_pump_temp+273.15)*FlowRate*Cef; // mPa
+
+}
+
 
 
 char* parseType(char *data){
@@ -677,9 +739,9 @@ int prn_jsn(char *xdata,float press, float temperature){
           } 
           else {
               fprintf(stdout, "\"pump_temp\": %.2f",output.ozone_pump_temp);
-              fprintf(stdout, ", \"current\": %.3f",output.ozone_current_uA);
-              fprintf(stdout, ", \"battery_volt\": %.1f",output.ozone_battery_v);
-              fprintf(stdout, ", \"pump_current\": %.1f",output.ozone_pump_curr_mA);
+              fprintf(stdout, ", \"current\": %.4f",output.ozone_current);
+              fprintf(stdout, ", \"battery_volt\": %.1f",output.ozone_battery);
+              fprintf(stdout, ", \"pump_current\": %.1f",output.ozone_pump_curr);
               fprintf(stdout, ", \"external_volt\": %.2f",output.ext_voltage);
               fprintf(stdout, ", \"O3_pressure\": %.3f",output.O3_partial_pressure);
           } 
@@ -788,6 +850,15 @@ int prn_jsn(char *xdata,float press, float temperature){
             fprintf(stdout,", \"production_year\": %d",output.production_year);
             fprintf(stdout,", \"hardware_version\": %d",output.hardware_version);
         }
+        else if(strcmp(instrument,"V7") == 0){ 
+            output_v7 output={0};
+            parseV7(&output,data,press); 
+            fprintf(stdout, "\"pump_temp\": %.2f",output.ozone_pump_temp);
+            fprintf(stdout, ", \"current\": %.3f",output.ozone_current);
+            fprintf(stdout, ", \"battery_volt\": %.1f",output.ozone_battery);
+            fprintf(stdout, ", \"pump_current\": %.1f",output.ozone_pump_curr);
+            fprintf(stdout, ", \"O3_pressure\": %.3f",output.O3_partial_pressure);
+        }
       
       
       
@@ -846,6 +917,11 @@ int prn_aux(char *xdata,float press, float temperature){
             parseFLASHB(&output,data,press,temperature); 
             fprintf(stdout," counts=%d ",output.photomultiplier_counts);
         }
+        else if(strcmp(instrument,"V7") == 0){ 
+            output_v7 output={0};
+            parseV7(&output,data,press);
+            fprintf(stdout," O3_P=%.3fmPa ",output.O3_partial_pressure); 
+        }
     }
     free(tofree); 
     
@@ -873,9 +949,9 @@ void prn_full(char *xdata,float press, float temperature){
             } 
             else { 
                 fprintf(stdout," pump_temp=%.2fC",output.ozone_pump_temp);
-                fprintf(stdout," current=%.4fuA",output.ozone_current_uA);
-                fprintf(stdout," battery_volt=%.1fV",output.ozone_battery_v);
-                fprintf(stdout," pump_current=%.1fmA",output.ozone_pump_curr_mA);
+                fprintf(stdout," current=%.4fuA",output.ozone_current);
+                fprintf(stdout," battery_volt=%.1fV",output.ozone_battery);
+                fprintf(stdout," pump_current=%.1fmA",output.ozone_pump_curr);
                 fprintf(stdout," external_volt=%.1fV",output.ext_voltage);
                 fprintf(stdout," O3_pressure=%.3fmPa",output.O3_partial_pressure);
             }
@@ -971,12 +1047,21 @@ void prn_full(char *xdata,float press, float temperature){
             fprintf(stdout," counts=%d",output.photomultiplier_counts);
             fprintf(stdout," temperature=%.2fC",output.photomultiplier_temperature);
             fprintf(stdout," battery_voltage=%.2fV",output.battery_voltage);
-            fprintf(stdout," yuv_current=%.2fuA",output.yuv_current);
-            fprintf(stdout," pmt_voltage=%.1fmV",output.pmt_voltage);
+            fprintf(stdout," yuv_current=%.2fmA",output.yuv_current);
+            fprintf(stdout," pmt_voltage=%.1fV",output.pmt_voltage);
             fprintf(stdout," firmware_version=%.1f",output.firmware_version);
             fprintf(stdout," production_year=%d",output.production_year);
             fprintf(stdout," hardware_version=%d",output.hardware_version);
-        }     
+        }   
+        else if(strcmp(instrument,"V7") == 0){ 
+            output_v7 output={0};
+            parseV7(&output,data,press); 
+            fprintf(stdout," pump_temp=%.2fC",output.ozone_pump_temp);
+            fprintf(stdout," current=%.3fuA",output.ozone_current);
+            fprintf(stdout," battery_volt=%.1fV",output.ozone_battery);
+            fprintf(stdout," pump_current=%.1fmA",output.ozone_pump_curr);
+            fprintf(stdout," O3_pressure=%.3fmPa",output.O3_partial_pressure);
+        }  
     } 
     free(tofree);
 }
