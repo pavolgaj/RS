@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <signal.h>
 
 #ifdef CYGWIN
   #include <fcntl.h>  // cygwin: _setmode()
@@ -125,6 +126,12 @@ int first=1;  //first frame or not 1/0
  * - Adapted from sci.astro FAQ.
  * - Ignores UTC leap seconds.
  */
+ 
+void sig_handler(int sig) {
+    if (sig == SIGINT) { fprintf(stdout, "\n]\n"); }
+    exit(1); 
+} 
+ 
 static void Gps2Date(long GpsWeek, long GpsSeconds, int *Year, int *Month, int *Day) {
 
     long GpsDays, Mjd;
@@ -1141,7 +1148,10 @@ int main(int argc, char **argv) {
             option_min = 1;
         }
         else if   (strcmp(*argv, "--json") == 0) { gpx.option.jsn = 1; }
-        else if   (strcmp(*argv, "--json2") == 0) { gpx.option.jsn = 2; }
+        else if   (strcmp(*argv, "--json2") == 0) { 
+            gpx.option.jsn = 2; 
+            gpx.option.slt = 1;
+        }
         else if   (strcmp(*argv, "--jsn_cfq") == 0) {
             int frq = -1;  // center frequency / Hz
             ++argv;
@@ -1198,7 +1208,10 @@ int main(int argc, char **argv) {
     }
     #endif
     
-    if (gpx.option.jsn==2) fprintf(stdout, "[\n");
+    if (gpx.option.jsn==2) {
+        fprintf(stdout, "[\n");
+        signal(SIGINT, sig_handler);
+    }
 
     if (!rawhex) {
         if (!option_softin) {

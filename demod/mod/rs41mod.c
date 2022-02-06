@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <signal.h>
 
 #ifdef CYGWIN
   #include <fcntl.h>  // cygwin: _setmode()
@@ -182,6 +183,11 @@ static ui8_t mask[MASK_LEN] = { 0x96, 0x83, 0x3E, 0x51, 0xB1, 0x49, 0x08, 0x98,
 /* ------------------------------------------------------------------------------------ */
 
 #define BAUD_RATE 4800
+
+void sig_handler(int sig) {
+    if (sig == SIGINT) { fprintf(stdout, "\n]\n"); }
+    exit(1); 
+}
 
 /* ------------------------------------------------------------------------------------ */
 /*
@@ -2043,7 +2049,6 @@ static void print_frame(gpx_t *gpx, int len) {
 
 
 int main(int argc, char *argv[]) {
-
     //int option_inv = 0;    // invertiert Signal
     int option_min = 0;
     int option_iq = 0;
@@ -2262,7 +2267,10 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "reading float32 soft symbols\n");
     }
     #endif
-    if (gpx.option.jsn==2) fprintf(stdout, "[\n");
+    if (gpx.option.jsn==2) {
+        fprintf(stdout, "[\n");
+        signal(SIGINT, sig_handler);
+    }
 
     if (!rawhex) {
 
