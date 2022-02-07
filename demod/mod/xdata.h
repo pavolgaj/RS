@@ -277,7 +277,7 @@ void parseCFH(output_cfh *output, char* xdata){
     output->instrument_number = (int)strntol(xdata+2,2, NULL, 16);
     
     //Frost point temperature (maybe better would be "MirrorTemperature")
-    //output->mirror_temp = ((int)strntol(xdata+4,6, NULL, 16)-12362317.72)/88293.637;  //C   //WRONG COEF.!
+    output->mirror_temp = ((int)strntol(xdata+4,6, NULL, 16)-12362317.72)/88293.637;  //C   //WRONG COEF.!?
     
     //Tuning or alignment voltage of photodiodes
     //printf("%d\n",(int)strntol(xdata+10,6, NULL, 16));
@@ -767,15 +767,20 @@ int prn_jsn(char *xdata,float press, float temperature){
       }
       else if(strcmp(instrument,"CFH") == 0){ 
             output_cfh output={0};
-            parseCFH(&output,data); 
-            //fprintf(stdout,"\"mirror_temp\": %.2f",output.mirror_temp);
-            fprintf(stdout,"\"optics_volt\": %.5f",output.optics_voltage);
+            parseCFH(&output,data);
+            
+            if (strcmp(instrument,linst)==0) { fprintf(stdout, ", ");}
+            
+            fprintf(stdout,"\"mirror_temp\": %.2f",output.mirror_temp);
+            fprintf(stdout,", \"optics_volt\": %.5f",output.optics_voltage);
             fprintf(stdout,", \"optics_temp\": %.2f",output.optics_temp);
             fprintf(stdout,", \"battery_volt\": %.2f",output.battery);
       } 
       else if(strcmp(instrument,"COBALD") == 0){          
           output_cobald output={0};
           parseCOBALD(&output,data);
+          
+          if (strcmp(instrument,linst)==0) { fprintf(stdout, ", ");}
           
           fprintf(stdout, "\"sonde\": %d",output.sonde_number);
           fprintf(stdout, ", \"temp\": %.2f",output.internal_temperature);
@@ -863,6 +868,9 @@ int prn_jsn(char *xdata,float press, float temperature){
         else if(strcmp(instrument,"FLASH-B") == 0){ 
             output_flashb output={0};
             parseFLASHB(&output,data,press,temperature); 
+            
+            if (strcmp(instrument,linst)==0) { fprintf(stdout, ", ");}
+            
             fprintf(stdout,"\"background_counts\": %d",output.photomultiplier_background_counts);
             fprintf(stdout,", \"counts\": %d",output.photomultiplier_counts);
             fprintf(stdout,", \"temperature\": %.2f",output.photomultiplier_temperature);
@@ -876,6 +884,9 @@ int prn_jsn(char *xdata,float press, float temperature){
         else if(strcmp(instrument,"V7") == 0){ 
             output_v7 output={0};
             parseV7(&output,data,press); 
+            
+            if (strcmp(instrument,linst)==0) { fprintf(stdout, ", ");}
+            
             fprintf(stdout, "\"pump_temp\": %.2f",output.ozone_pump_temp);
             fprintf(stdout, ", \"current\": %.3f",output.ozone_current);
             fprintf(stdout, ", \"battery_volt\": %.1f",output.ozone_battery);
@@ -913,7 +924,7 @@ int prn_aux(char *xdata,float press, float temperature){
         else if(strcmp(instrument,"CFH") == 0){ 
             output_cfh output={0};
             parseCFH(&output,data); 
-            //fprintf(stdout, "mirror_temp=%.2fC",output.mirror_temp);
+            fprintf(stdout," mirror_temp=%.2fC",output.mirror_temp);
             fprintf(stdout," optics_temp=%.2fC",output.optics_temp);
         } 
         else if(strcmp(instrument,"COBALD") == 0){ 
@@ -984,7 +995,7 @@ void prn_full(char *xdata,float press, float temperature){
         else if(strcmp(instrument,"CFH") == 0){ 
             output_cfh output={0};
             parseCFH(&output,data); 
-            //fprintf(stdout, "mirror_temp=%.2fC",output.mirror_temp);
+            fprintf(stdout," mirror_temp=%.2fC",output.mirror_temp);
             fprintf(stdout," optics_volt=%.5fV",output.optics_voltage);
             fprintf(stdout," optics_temp=%.2fC",output.optics_temp);
             fprintf(stdout," battery_volt=%.2fV",output.battery);

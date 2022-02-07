@@ -45,7 +45,7 @@ void prn_test(char *xdata,float press, float temperature){
             output_cfh output={0};
             parseCFH(&output,data); 
             printf("number: %d\n",output.instrument_number);
-            //printf("mirror_temp: %g\n",output.mirror_temp);
+            printf("mirror_temp: %g\n",output.mirror_temp);
             printf("optics_voltage: %g\n",output.optics_voltage);
             printf("optics_temp: %g\n",output.optics_temp);
             printf("battery: %g\n",output.battery);
