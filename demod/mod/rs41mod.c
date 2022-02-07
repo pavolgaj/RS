@@ -62,7 +62,7 @@ typedef struct {
     i8_t sat;  // GPS sat data
     i8_t ptu;  // PTU: temperature humidity (pressure)
     i8_t dwp;  // PTU derived: dew point
-    i8_t aux;
+    i8_t aux;  // decode xdata
     i8_t inv;
     i8_t aut;
     i8_t jsn;  // JSON output (auto_rx)
