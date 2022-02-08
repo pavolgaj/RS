@@ -924,29 +924,29 @@ int prn_aux(char *xdata,float press, float temperature){
         else if(strcmp(instrument,"CFH") == 0){ 
             output_cfh output={0};
             parseCFH(&output,data); 
-            fprintf(stdout," mirror_temp=%.2fC",output.mirror_temp);
-            fprintf(stdout," optics_temp=%.2fC",output.optics_temp);
+            fprintf(stdout," Tmirror=%.2fC",output.mirror_temp);
+            fprintf(stdout," Toptics=%.2fC",output.optics_temp);
         } 
         else if(strcmp(instrument,"COBALD") == 0){ 
             output_cobald output={0};
             parseCOBALD(&output,data); 
-            fprintf(stdout," blue_scatt=%d ",output.blue_backscatter);
-            fprintf(stdout," red_scatt=%d ",output.red_backscatter);
+            fprintf(stdout," Rscatt=%d ",output.blue_backscatter);
+            fprintf(stdout," Bscatt=%d ",output.red_backscatter);
         }
         else if(strcmp(instrument,"PCFH") == 0){ 
             output_pcfh output={0};
             parsePCFH(&output,data); 
             if ((strncmp(output.packetID,"01",2) == 0) || (strcmp(output.packetID,"02") == 0)) {
-                fprintf(stdout," frost_point_mirror_temperature_%s=%.2fC ",output.packetID,output.frost_point_mirror_temperature);
-                fprintf(stdout," air_temperature_%s=%.2fC ",output.packetID,output.air_temperature);
-                fprintf(stdout," frost_point_mirror_reflectance_%s=%.3f ",output.packetID,output.frost_point_mirror_reflectance);
+                fprintf(stdout," Tmirror_%s=%.2fC ",output.packetID,output.frost_point_mirror_temperature);
+                fprintf(stdout," Tair_%s=%.2fC ",output.packetID,output.air_temperature);
+                fprintf(stdout," REFmirror_%s=%.3f ",output.packetID,output.frost_point_mirror_reflectance);
             }
         } 
         else if(strcmp(instrument,"SKYDEW") == 0){ 
             output_skydew output={0};
             parseSKYDEW(&output,data); 
-            fprintf(stdout," mirror_temperature=%d ",output.mirror_temperature);
-            fprintf(stdout," scattered_light=%.4f ",output.scattered_light);                 
+            fprintf(stdout," Tmirror=%d ",output.mirror_temperature);
+            fprintf(stdout," Lscatt=%.4f ",output.scattered_light);                 
         } 
         else if(strcmp(instrument,"FLASH-B") == 0){ 
             output_flashb output={0};
