@@ -465,7 +465,7 @@ static int f32read_cblock(dsp_t *dsp) {
     int n;
     int len;
     float x, y;
-    ui8_t s[4*2*dsp->decM]; //uin8,int16,flot32
+    ui8_t s[4*2*dsp->decM]; //uin8,int16,float32
     ui8_t *u = (ui8_t*)s;
     short *b = (short*)s;
     float *f = (float*)s;
@@ -625,16 +625,80 @@ static float complex lowpass0(float complex buffer[], ui32_t sample, ui32_t taps
     }
     return (float complex)w;
 }
-static float complex lowpass(float complex buffer[], ui32_t sample, ui32_t taps, float *ws) {
-    ui32_t n;
-    ui32_t s = sample % taps;
+static float complex lowpass1a(float complex buffer[], ui32_t sample, ui32_t taps, float *ws) {
     double complex w = 0;
+    ui32_t n;
+    ui32_t S = taps + (sample % taps);
     for (n = 0; n < taps; n++) {
-        w += buffer[n]*ws[taps+s-n]; // ws[taps+s-n] = ws[(taps+sample-n)%taps]
+        w += buffer[n]*ws[S-n]; // ws[taps+s-n] = ws[(taps+sample-n)%taps]
     }
     return (float complex)w;
 // symmetry: ws[n] == ws[taps-1-n]
 }
+//static __attribute__((optimize("-ffast-math"))) float complex lowpass()
+static float complex lowpass(float complex buffer[], ui32_t sample, ui32_t taps, float *ws) {
+    float complex w = 0;
+    int n; // -Ofast
+    int S = taps-1 - (sample % taps);
+    for (n = 0; n < taps; n++) {
+        w += buffer[n]*ws[S+n]; // ws[taps+s-n] = ws[(taps+sample-n)%taps]
+    }
+    return w;
+// symmetry: ws[n] == ws[taps-1-n]
+}
+static float complex lowpass2(float complex buffer[], ui32_t sample, ui32_t taps, float *ws) {
+    float complex w = 0;
+    int n; // -Ofast
+    int s = sample % taps;
+    int S1 = s+1;
+    int S1N = S1-taps;
+    int n0 = taps-1-s;
+    for (n = 0; n < n0; n++) {
+        w += buffer[S1+n]*ws[n];
+    }
+    for (n = n0; n < taps; n++) {
+        w += buffer[S1N+n]*ws[n];
+    }
+    return w;
+// symmetry: ws[n] == ws[taps-1-n]
+}
+static float complex lowpass0_sym(float complex buffer[], ui32_t sample, ui32_t taps, float *ws) {
+    ui32_t n;
+    double complex w = buffer[(sample+(taps+1)/2) % taps]*ws[(taps-1)/2]; // (N+1)/2 = (N-1)/2 + 1
+    for (n = 0; n < (taps-1)/2; n++) {
+        w += (buffer[(sample+n+1)%taps]+buffer[(sample+taps-n)%taps])*ws[n];
+    }
+    return (float complex)w;
+}
+static float complex lowpass2_sym(float complex buffer[], ui32_t sample, ui32_t taps, float *ws) {
+    float complex w = 0;
+    int n;
+    int s = (sample+1) % taps; // lpIQ
+    int SW = (taps-1)/2;
+    int B1 = s + SW;
+    int n1 = SW - s;
+    int n0 = 0;
+
+    if (s > SW) {
+        B1 -= taps;
+        n1 = -n1 - 1;
+        n0 = B1+n1+1;
+    }
+
+    w = buffer[B1]*ws[SW];
+
+    for (n = 1; n < n1+1; n++) {
+        w += (buffer[B1 + n] + buffer[B1 - n]) * ws[SW+n];
+    }
+
+    for (n = 0; n < SW-n1; n++) {
+        w += (buffer[s + n] + buffer[s-1 - n]) * ws[SW+SW-n];
+    }
+
+    return w;
+// symmetry: ws[n] == ws[taps-1-n]
+}
+
 
 static float re_lowpass0(float buffer[], ui32_t sample, ui32_t taps, float *ws) {
     ui32_t n;
@@ -708,7 +772,7 @@ int f32buf_sample(dsp_t *dsp, int inv) {
         w = z * conj(z0);
         s_fm = gain * carg(w)/M_PI;
 
-        dsp->rot_iqbuf[dsp->sample_in % dsp->N_IQBUF] = z;
+        dsp->rot_iqbuf[dsp->sample_in % dsp->N_IQBUF] = z;  // sample_in & (N-1) , N = (1<<LOG2N)
 
 
         if (dsp->opt_iq >= 2)
@@ -785,7 +849,7 @@ int f32buf_sample(dsp_t *dsp, int inv) {
     dsp->fm_buffer[dsp->sample_in % dsp->M] = s_fm;
 
     if (inv) s = -s;
-    dsp->bufs[dsp->sample_in % dsp->M] = s;
+    dsp->bufs[dsp->sample_in % dsp->M] = s;  // sample_in & (M-1) , M = (1<<LOG2N)
 
 
     xneu = dsp->bufs[(dsp->sample_in  ) % dsp->M];
@@ -1312,7 +1376,7 @@ int init_buffers(dsp_t *dsp) {
 
     dsp->K = K;
     dsp->L = L;
-    dsp->M = M;
+    dsp->M = M; // = (1<<LOG2N)
 
     dsp->Nvar = L; // wenn Nvar fuer xnorm, dann Nvar=rshd.L
 
@@ -1389,7 +1453,7 @@ int init_buffers(dsp_t *dsp) {
     {
         if (dsp->nch < 2) return -1;
 
-        dsp->N_IQBUF = dsp->DFT.N;
+        dsp->N_IQBUF = dsp->DFT.N; // = (1<<LOG2N)
         dsp->rot_iqbuf = calloc(dsp->N_IQBUF+1, sizeof(float complex));  if (dsp->rot_iqbuf == NULL) return -1;
     }
 

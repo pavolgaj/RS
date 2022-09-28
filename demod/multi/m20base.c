@@ -1,18 +1,9 @@
 
 /*
- *  mXX m18/m20 (test)
- *
- *  (cf. mXX_20180919.c)
+ *  mXX / m20
  *  sync header: correlation/matched filter
- *  files: mXXmod.c demod_mod.h demod_mod.c
  *  compile:
- *      gcc -c demod_mod.c
- *      gcc mXXmod.c demod_mod.o -lm -o mXXmod
- *
- * 2018-09-19 Ury:  (len=0x43) ./mXX -c -vv --br 9600 mXX_20180919.wav
- * 2019-11-06 Ury:  (len=0x45) ./mXX -c -vv --br 9600 mXX_20191106.wav
- * 2020-02-14 Ury:  (len=0x45) ./mXX -c -vv --br 9600 mXX_20200214.wav
- * 2020-05-11 Wien: (len=0x45) ./mXX -c -vv --br 9603 mXX_20200511.wav
+ *      gcc -c m20base.c
  *
  *  author: zilog80
  */
@@ -21,25 +12,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <signal.h>
 
+/*
 #ifdef CYGWIN
   #include <fcntl.h>  // cygwin: _setmode()
   #include <io.h>
 #endif
+*/
 
-// optional JSON "version"
-//  (a) set global
-//      gcc -DVERSION_JSN [-I<inc_dir>] ...
-#ifdef VERSION_JSN
-  #include "version_jsn.h"
-#endif
-// or
-//  (b) set local compiler option, e.g.
-//      gcc -DVER_JSN_STR=\"0.0.2\" ...
-
-
-#include "demod_mod.h"
+#include "demod_base.h"
 
 
 typedef struct {
@@ -49,7 +30,6 @@ typedef struct {
     i8_t ecc;  // M10/M20: no ECC
     i8_t sat;  // GPS sat data
     i8_t ptu;  // PTU: temperature
-    i8_t dwp;  // PTU derived: dew point
     i8_t inv;
     i8_t aut;
     i8_t col;  // colors
@@ -79,6 +59,7 @@ dduudduudduudduu duduudduuduudduu  ddududuudduduudd uduuddududududud uudduduuddu
                                                     //"0111011010011111"; // M10: 76 9F , w/ aux-data
                                                     //"0110010001001001"; // M10-dop: 64 49 09
                                                     //"0110010010101111"; // M10+: 64 AF w/ gtop-GPS
+                                                    //"0100010100100000"; // M20: 45 20 (baud=9600)
 static char rawheader[] = "10011001100110010100110010011001";
 
 #define FRAME_LEN       (100+1)   // 0x64+1
@@ -117,7 +98,6 @@ typedef struct {
     ui8_t type;
 } gpx_t;
 
-int first=1;  //first frame or not 1/0
 
 /* -------------------------------------------------------------------------- */
 #define SECONDS_IN_WEEK  (604800.0)  // 7*86400
@@ -126,12 +106,6 @@ int first=1;  //first frame or not 1/0
  * - Adapted from sci.astro FAQ.
  * - Ignores UTC leap seconds.
  */
- 
-void sig_handler(int sig) {
-    if (sig == SIGINT) { fprintf(stdout, "\n]\n"); }
-    exit(1); 
-} 
- 
 static void Gps2Date(long GpsWeek, long GpsSeconds, int *Year, int *Month, int *Day) {
 
     long GpsDays, Mjd;
@@ -785,17 +759,6 @@ static int print_pos(gpx_t *gpx, int bcOK, int csOK) {
                         if (gpx->P < 100.0f) fprintf(stdout, " P=%.2fhPa ", gpx->P);
                         else                 fprintf(stdout, " P=%.1fhPa ", gpx->P);
                     }
-                    // dew point
-                    if (gpx->option.dwp)
-                    {
-                        float rh = gpx->RH;
-                        float Td = -273.15f; // dew point Td
-                        if (rh > 0.0f && gpx->T > -273.0f) {
-                            float gamma = logf(rh / 100.0f) + (17.625f * gpx->T / (243.04f + gpx->T));
-                            Td = 243.04f * gamma / (17.625f - gamma);
-                            fprintf(stdout, " Td=%.1fC ", Td);
-                        }
-                    }
                 }
                 fprintf(stdout, ANSI_COLOR_RESET"");
             }
@@ -836,17 +799,6 @@ static int print_pos(gpx_t *gpx, int bcOK, int csOK) {
                         if (gpx->P < 100.0f) fprintf(stdout, " P=%.2fhPa ", gpx->P);
                         else                 fprintf(stdout, " P=%.1fhPa ", gpx->P);
                     }
-                    // dew point
-                    if (gpx->option.dwp)
-                    {
-                        float rh = gpx->RH;
-                        float Td = -273.15f; // dew point Td
-                        if (rh > 0.0f && gpx->T > -273.0f) {
-                            float gamma = logf(rh / 100.0f) + (17.625f * gpx->T / (243.04f + gpx->T));
-                            Td = 243.04f * gamma / (17.625f - gamma);
-                            fprintf(stdout, " Td=%.1fC ", Td);
-                        }
-                    }
                 }
             }
             fprintf(stdout, "\n");
@@ -856,15 +808,12 @@ static int print_pos(gpx_t *gpx, int bcOK, int csOK) {
         if (gpx->option.jsn) {
             // Print out telemetry data as JSON
             if (csOK) {
-                char *ver_jsn = NULL;
                 int j;
                 char sn_id[4+12+4] = "M20-";
 
                 strncpy(sn_id+4, gpx->SN, 12+4);
                 sn_id[15+4] = '\0';
 
-                if ((!first) && (gpx->option.jsn==2)) {fprintf(stdout, ",\n"); }
-                first=0;
                 fprintf(stdout, "{ \"type\": \"%s\"", "M20");
                 fprintf(stdout, ", \"frame\": %lu, ", (unsigned long)gpx->gps_cnt); // sec_gps0+0.5
                 fprintf(stdout, "\"id\": \"%s\", \"datetime\": \"%04d-%02d-%02dT%02d:%02d:%06.3fZ\", \"lat\": %.5f, \"lon\": %.5f, \"alt\": %.5f, \"vel_h\": %.5f, \"heading\": %.5f, \"vel_v\": %.5f",
@@ -873,15 +822,6 @@ static int print_pos(gpx_t *gpx, int bcOK, int csOK) {
                     if (gpx->T > -273.0f) fprintf(stdout, ", \"temp\": %.1f", gpx->T );
                     if (gpx->RH > -0.5f)  fprintf(stdout, ", \"humidity\": %.1f", gpx->RH );
                     if (gpx->P > 0.0f)    fprintf(stdout, ", \"pressure\": %.2f",  gpx->P );
-                    if (gpx->option.dwp) {
-                        float rh = gpx->RH;
-                        float Td = -273.15f; // dew point Td
-                        if (rh > 0.0f && gpx->T > -273.0f) {
-                            float gamma = logf(rh / 100.0f) + (17.625f * gpx->T / (243.04f + gpx->T));
-                            Td = 243.04f * gamma / (17.625f - gamma);
-                            fprintf(stdout, ", \"dew\": %.1f", Td);
-                        }  
-                    } 
                 }
                 fprintf(stdout, ", \"rawid\": \"M20_%02X%02X%02X\"", gpx->frame_bytes[pos_SN], gpx->frame_bytes[pos_SN+1], gpx->frame_bytes[pos_SN+2]); // gpx->type
                 fprintf(stdout, ", \"subtype\": \"0x%02X\"", gpx->type);
@@ -893,30 +833,24 @@ static int print_pos(gpx_t *gpx, int bcOK, int csOK) {
                 fprintf(stdout, ", \"ref_datetime\": \"%s\"", "GPS" ); // {"GPS", "UTC"} GPS-UTC=leap_sec
                 fprintf(stdout, ", \"ref_position\": \"%s\"", "GPS" ); // {"GPS", "MSL"} GPS=ellipsoid , MSL=geoid
 
-                #ifdef VER_JSN_STR
-                    ver_jsn = VER_JSN_STR;
-                #endif
-                if (ver_jsn && *ver_jsn != '\0') fprintf(stdout, ", \"version\": \"%s\"", ver_jsn);
-                fprintf(stdout, " }");
-                if (gpx->option.jsn==1) {fprintf(stdout, "\n");}
+                fprintf(stdout, " }\n");
+                fprintf(stdout, "\n");
             }
         }
 
     }
 
-    return err;
+    return !err;
 }
 
-static int print_frame(gpx_t *gpx, int pos, int b2B) {
+static int print_frame(gpx_t *gpx, int pos, dsp_t *dsp) {
     int i;
     ui8_t byte;
     int cs1, cs2;
     int bc1, bc2, bc;
     int flen = stdFLEN; // stdFLEN=0x64, auxFLEN=0x76; M20:0x45 ?
 
-    if (b2B) {
-        bits2bytes(gpx->frame_bits, gpx->frame_bytes);
-    }
+    bits2bytes(gpx->frame_bits, gpx->frame_bytes);
     flen = gpx->frame_bytes[0];
     if (flen == stdFLEN) gpx->auxlen = 0;
     else {
@@ -1002,7 +936,19 @@ static int print_frame(gpx_t *gpx, int pos, int b2B) {
         }
     }
     */
-    else print_pos(gpx, bc, cs1 == cs2);
+    else {
+        int ret = 0;
+        pthread_mutex_lock( dsp->thd->mutex );
+        //fprintf(stdout, "<%d> ", dsp->thd->tn);
+        fprintf(stdout, "<%d: ", dsp->thd->tn);
+        fprintf(stdout, "s=%+.4f, ", dsp->mv);
+        fprintf(stdout, "f=%+.4f", -dsp->thd->xlt_fq);
+        if (dsp->opt_dc) fprintf(stdout, "%+.6f", dsp->Df/(double)dsp->sr);
+        fprintf(stdout, ">  ");
+        ret = print_pos(gpx, bc, cs1 == cs2);
+        if (ret==0) fprintf(stdout, "\n");
+        pthread_mutex_unlock( dsp->thd->mutex );
+    }
 
     return (gpx->frame_bytes[0]<<8)|gpx->frame_bytes[1];
 }
@@ -1010,35 +956,24 @@ static int print_frame(gpx_t *gpx, int pos, int b2B) {
 /* -------------------------------------------------------------------------- */
 
 
-int main(int argc, char **argv) {
+void *thd_m20(void *targs) { // pcm_t *pcm, double xlt_fq
 
-    //int option_res = 0;      // genauere Bitmessung
-    int option_min = 0;
-    int option_iq = 0;
-    int option_iqdc = 0;
-    int option_lp = 0;
+    thargs_t *tharg = targs;
+    pcm_t *pcm = &(tharg->pcm);
+
+
+    //int option_inv = 0;      // invertiert Signal
+    int option_iq = 5;
     int option_dc = 0;
-    int option_noLUT = 0;
-    int option_softin = 0;
-    int option_pcmraw = 0;
-    int wavloaded = 0;
-    int sel_wavch = 0;     // audio channel: left
     int spike = 0;
-    int rawhex = 0;
-    int cfreq = -1;
 
-    float baudrate = -1;
-
-    FILE *fp = NULL;
-    char *fpname = NULL;
 
     int k;
 
     int bit, bit0;
     int bitpos = 0;
-    int bitQ;
+    int bitQ = 0;
     int pos;
-    hsbit_t hsbit, hsbit1;
 
     //int headerlen = 0;
 
@@ -1047,395 +982,146 @@ int main(int argc, char **argv) {
     float thres = 0.76;
     float _mv = 0.0;
 
-    float lpIQ_bw = 24e3;
-
     int symlen = 2;
     int bitofs = 0; // 0 .. +2
     int shift = 0;
 
-    pcm_t pcm = {0};
     dsp_t dsp = {0};  //memset(&dsp, 0, sizeof(dsp));
-
-    hdb_t hdb = {0};
 
     gpx_t gpx = {0};
 
-
+/*
 #ifdef CYGWIN
     _setmode(fileno(stdin), _O_BINARY);  // _setmode(_fileno(stdin), _O_BINARY);
 #endif
     setbuf(stdout, NULL);
+*/
+
+    // init gpx
+
+    gpx.option.inv = 0; // irrelevant
+    gpx.option.vbs = 1;
+    gpx.option.ptu = 1;
+    gpx.option.jsn = tharg->option_jsn;
+    gpx.option.col = 0; //option_color;
+
+    gpx.jsn_freq = tharg->jsn_freq;
 
 
-    fpname = argv[0];
-    ++argv;
-    while ((*argv) && (!wavloaded)) {
-        if      ( (strcmp(*argv, "-h") == 0) || (strcmp(*argv, "--help") == 0) ) {
-            fprintf(stderr, "%s [options] audio.wav\n", fpname);
-            fprintf(stderr, "  options:\n");
-            //fprintf(stderr, "       -v, --verbose\n");
-            fprintf(stderr, "       -r, --raw\n");
-            fprintf(stderr, "       -c, --color\n");
-            return 0;
-        }
-        else if ( (strcmp(*argv, "-v") == 0) || (strcmp(*argv, "--verbose") == 0) ) {
-            gpx.option.vbs = 1;
-        }
-        else if ( (strcmp(*argv, "-vv" ) == 0) ) gpx.option.vbs = 2;
-        else if ( (strcmp(*argv, "-vvv") == 0) ) gpx.option.vbs = 3;
-        else if ( (strcmp(*argv, "-r") == 0) || (strcmp(*argv, "--raw") == 0) ) {
-            gpx.option.raw = 1;
-        }
-        else if ( (strcmp(*argv, "-i") == 0) || (strcmp(*argv, "--invert") == 0) ) {
-            gpx.option.inv = 1;  // nicht noetig
-        }
-        else if ( (strcmp(*argv, "-c") == 0) || (strcmp(*argv, "--color") == 0) ) {
-            gpx.option.col = 1;
-        }
-        else if ( (strcmp(*argv, "--br") == 0) ) {
-            ++argv;
-            if (*argv) {
-                baudrate = atof(*argv);
-                if (baudrate < 9000 || baudrate > 10000) baudrate = BAUD_RATE; // default: M20:9600, M10:9615
-            }
-            else return -1;
-        }
-        //else if   (strcmp(*argv, "--res") == 0) { option_res = 1; }
-        else if ( (strcmp(*argv, "--ptu") == 0) ) {
-            gpx.option.ptu = 1;
-        }
-        else if   (strcmp(*argv, "--dewp") == 0) { gpx.option.dwp = 1; }
-        else if ( (strcmp(*argv, "--spike") == 0) ) {
-            spike = 1;
-        }
-        else if   (strcmp(*argv, "--ch2") == 0) { sel_wavch = 1; }  // right channel (default: 0=left)
-        else if   (strcmp(*argv, "--softin") == 0) { option_softin = 1; }  // float32 soft input
-        else if   (strcmp(*argv, "--silent") == 0) { gpx.option.slt = 1; }
-        else if   (strcmp(*argv, "--ths") == 0) {
-            ++argv;
-            if (*argv) {
-                thres = atof(*argv);
-            }
-            else return -1;
-        }
-        else if ( (strcmp(*argv, "-d") == 0) ) {
-            ++argv;
-            if (*argv) {
-                shift = atoi(*argv);
-                if (shift >  4) shift =  4;
-                if (shift < -4) shift = -4;
-            }
-            else return -1;
-        }
-        else if   (strcmp(*argv, "--iq0") == 0) { option_iq = 1; }  // differential/FM-demod
-        else if   (strcmp(*argv, "--iq2") == 0) { option_iq = 2; }
-        else if   (strcmp(*argv, "--iq3") == 0) { option_iq = 3; }  // iq2==iq3
-        else if   (strcmp(*argv, "--iqdc") == 0) { option_iqdc = 1; }  // iq-dc removal (iq0,2,3)
-        else if   (strcmp(*argv, "--IQ") == 0) { // fq baseband -> IF (rotate from and decimate)
-            double fq = 0.0;                     // --IQ <fq> , -0.5 < fq < 0.5
-            ++argv;
-            if (*argv) fq = atof(*argv);
-            else return -1;
-            if (fq < -0.5) fq = -0.5;
-            if (fq >  0.5) fq =  0.5;
-            dsp.xlt_fq = -fq; // S(t) -> S(t)*exp(-f*2pi*I*t)
-            option_iq = 5;
-        }
-        else if   (strcmp(*argv, "--lpIQ") == 0) { option_lp |= LP_IQ; }  // IQ/IF lowpass
-        else if   (strcmp(*argv, "--lpbw") == 0) {  // IQ lowpass BW / kHz
-            double bw = 0.0;
-            ++argv;
-            if (*argv) bw = atof(*argv);
-            else return -1;
-            if (bw > 4.6 && bw < 48.0) lpIQ_bw = bw*1e3;
-            option_lp |= LP_IQ;
-        }
-        else if   (strcmp(*argv, "--lpFM") == 0) { option_lp |= LP_FM; }  // FM lowpass
-        else if   (strcmp(*argv, "--dc") == 0) { option_dc = 1; }
-        else if   (strcmp(*argv, "--noLUT") == 0) { option_noLUT = 1; }
-        else if   (strcmp(*argv, "--min") == 0) {
-            option_min = 1;
-        }
-        else if   (strcmp(*argv, "--json") == 0) { gpx.option.jsn = 1; }
-        else if   (strcmp(*argv, "--json2") == 0) { 
-            gpx.option.jsn = 2; 
-            gpx.option.slt = 1;
-        }
-        else if   (strcmp(*argv, "--jsn_cfq") == 0) {
-            int frq = -1;  // center frequency / Hz
-            ++argv;
-            if (*argv) frq = atoi(*argv); else return -1;
-            if (frq < 300000000) frq = -1;
-            cfreq = frq;
-        }
-        else if (strcmp(*argv, "--rawhex") == 0) { rawhex = 2; }  // raw hex input
-        else if (strcmp(*argv, "-") == 0) {
-            int sample_rate = 0, bits_sample = 0, channels = 0;
-            ++argv;
-            if (*argv) sample_rate = atoi(*argv); else return -1;
-            ++argv;
-            if (*argv) bits_sample = atoi(*argv); else return -1;
-            channels = 2;
-            if (sample_rate < 1 || (bits_sample != 8 && bits_sample != 16 && bits_sample != 32)) {
-                fprintf(stderr, "- <sr> <bs>\n");
-                return -1;
-            }
-            pcm.sr  = sample_rate;
-            pcm.bps = bits_sample;
-            pcm.nch = channels;
-            option_pcmraw = 1;
-        }
-        else {
-            fp = fopen(*argv, "rb");
-            if (fp == NULL) {
-                fprintf(stderr, "error: open %s\n", *argv);
-                return -1;
-            }
-            wavloaded = 1;
-        }
-        ++argv;
-    }
-    if (!wavloaded) fp = stdin;
+    pcm->sel_ch = 0;
 
-    if (option_iq == 5 && option_dc) option_lp |= LP_FM;
+    // m20: BT>1?, h=1.2 ?
+    symlen = 2;
 
-    // LUT faster for decM, however frequency correction after decimation
-    // LUT recommonded if decM > 2
+    // init dsp
     //
-    if (option_noLUT && option_iq == 5) dsp.opt_nolut = 1; else dsp.opt_nolut = 0;
+    dsp.fp = pcm->fp;
+    dsp.sr = pcm->sr;
+    dsp.sr_base = pcm->sr_base;
+    dsp.dectaps = pcm->dectaps;
+    dsp.decM = pcm->decM;
 
+    dsp.thd = &(tharg->thd);
 
-    if (gpx.option.raw && gpx.option.jsn) gpx.option.slt = 1;
+    dsp.bps = pcm->bps;
+    dsp.nch = pcm->nch;
+    dsp.ch = pcm->sel_ch;
+    dsp.br = (float)BAUD_RATE;
+    dsp.sps = (float)dsp.sr/dsp.br;
+    dsp.symlen = symlen;
+    dsp.symhd = 1; // M10!header
+    dsp._spb = dsp.sps*symlen;
+    dsp.hdr = rawheader;
+    dsp.hdrlen = strlen(rawheader);
+    dsp.BT = 1.8; // bw/time (ISI) // 1.0..2.0
+    dsp.h = 0.9;  // 1.2 modulation index
+    dsp.opt_iq = option_iq;
+    dsp.opt_lp = 1;
+    dsp.lpIQ_bw = 24e3; // IF lowpass bandwidth
+    dsp.lpFM_bw = 10e3; // FM audio lowpass
+    dsp.opt_dc  = tharg->option_dc;
+    dsp.opt_cnt = tharg->option_cnt;
 
-    if (cfreq > 0) gpx.jsn_freq = (cfreq+500)/1000;
-
-
-    #ifdef EXT_FSK
-    if (!option_softin) {
-        option_softin = 1;
-        fprintf(stderr, "reading float32 soft symbols\n");
+    if ( dsp.sps < 8 ) {
+        //fprintf(stderr, "note: sample rate low (%.1f sps)\n", dsp.sps);
     }
-    #endif
-    
-    if (gpx.option.jsn==2) {
-        fprintf(stdout, "[\n");
-        signal(SIGINT, sig_handler);
-    }
 
-    if (!rawhex) {
-        if (!option_softin) {
+    //headerlen = dsp.hdrlen;
 
-            if (option_iq == 0 && option_pcmraw) {
-                fclose(fp);
-                fprintf(stderr, "error: raw data not IQ\n");
-                return -1;
-            }
-            if (option_iq) sel_wavch = 0;
-
-            pcm.sel_ch = sel_wavch;
-            if (option_pcmraw == 0) {
-                k = read_wav_header(&pcm, fp);
-                if ( k < 0 ) {
-                    fclose(fp);
-                    fprintf(stderr, "error: wav header\n");
-                    return -1;
-                }
-            }
-
-            if (cfreq > 0) {
-                int fq_kHz = (cfreq - dsp.xlt_fq*pcm.sr + 500)/1e3;
-                gpx.jsn_freq = fq_kHz;
-            }
-
-            // m10: BT>1?, h=1.2 ?
-            symlen = 2;
-
-            // init dsp
-            //
-            dsp.fp = fp;
-            dsp.sr = pcm.sr;
-            dsp.bps = pcm.bps;
-            dsp.nch = pcm.nch;
-            dsp.ch = pcm.sel_ch;
-            dsp.br = (float)BAUD_RATE;
-            dsp.sps = (float)dsp.sr/dsp.br;
-            dsp.symlen = symlen;
-            dsp.symhd = 1; // M10!header
-            dsp._spb = dsp.sps*symlen;
-            dsp.hdr = rawheader;
-            dsp.hdrlen = strlen(rawheader);
-            dsp.BT = 1.8; // bw/time (ISI) // 1.0..2.0  // M20 ?
-            dsp.h = 0.9;  // 1.2 modulation index       // M20 ?
-            dsp.opt_iq = option_iq;
-            dsp.opt_iqdc = option_iqdc;
-            dsp.opt_lp = option_lp;
-            dsp.lpIQ_bw = lpIQ_bw; //24e3; // IF lowpass bandwidth
-            dsp.lpFM_bw = 10e3; // FM audio lowpass
-            dsp.opt_dc = option_dc;
-            dsp.opt_IFmin = option_min;
-
-            if ( dsp.sps < 8 ) {
-                fprintf(stderr, "note: sample rate low (%.1f sps)\n", dsp.sps);
-            }
-
-            if (baudrate > 0) {
-                dsp.br = (float)baudrate;
-                dsp.sps = (float)dsp.sr/dsp.br;
-                fprintf(stderr, "sps corr: %.4f\n", dsp.sps);
-            }
-
-            //headerlen = dsp.hdrlen;
+    k = init_buffers(&dsp);
+    if ( k < 0 ) {
+        fprintf(stderr, "error: init buffers\n");
+        goto exit_thread;
+    };
 
 
-            k = init_buffers(&dsp);
-            if ( k < 0 ) {
-                fprintf(stderr, "error: init buffers\n");
-                return -1;
-            }
-
-            bitofs += shift;
-        }
-        else {
-            // init circular header bit buffer
-            hdb.hdr = rawheader;
-            hdb.len = strlen(rawheader);
-            //hdb.thb = 1.0 - 3.1/(float)hdb.len; // 1.0-max_bit_errors/hdrlen
-            hdb.bufpos = -1;
-            hdb.buf = NULL;
-            /*
-            calloc(hdb.len, sizeof(char));
-            if (hdb.buf == NULL) {
-                fprintf(stderr, "error: malloc\n");
-                return -1;
-            }
-            */
-            hdb.ths = 0.8; // caution 0.7: false positive / offset
-            hdb.sbuf = calloc(hdb.len, sizeof(float));
-            if (hdb.sbuf == NULL) {
-                fprintf(stderr, "error: malloc\n");
-                return -1;
-            }
-        }
+    bitofs += shift;
 
 
-        while ( 1 )
-        {
-            if (option_softin) {
-                header_found = find_softbinhead(fp, &hdb, &_mv);
-            }
-            else {                                                              // FM-audio:
-                header_found = find_header(&dsp, thres, 2, bitofs, dsp.opt_dc); // optional 2nd pass: dc=0
-                _mv = dsp.mv;
-            }
-
-            if (header_found == EOF) break;
-
-            // mv == correlation score
-            if (_mv*(0.5-gpx.option.inv) < 0) {
-                gpx.option.inv ^= 0x1;  // M10: irrelevant
-            }
-
-            if (header_found) {
-
-                bitpos = 0;
-                pos = 0;
-                pos /= 2;
-                bit0 = '0'; // oder: _mv[j] > 0
-
-                while ( pos < BITFRAME_LEN+BITAUX_LEN ) {
-
-                    if (option_softin) {
-                        float s1 = 0.0;
-                        float s2 = 0.0;
-                        float s = 0.0;
-                        bitQ = f32soft_read(fp, &s1);
-                        if (bitQ != EOF) {
-                            bitQ = f32soft_read(fp, &s2);
-                            if (bitQ != EOF) {
-                                s = s2-s1; // integrate both symbols  // only 2nd Manchester symbol: s2
-                                bit = (s>=0.0); // no soft decoding
-                            }
-                        }
-                    }
-                    else {
-                        float bl = -1;
-                        if (option_iq >= 2) spike = 0;
-                        if (option_iq > 2)  bl = 4.0;
-                        //bitQ = read_slbit(&dsp, &bit, 0, bitofs, bitpos, bl, spike); // symlen=2
-                        bitQ = read_softbit2p(&dsp, &hsbit, 0, bitofs, bitpos, bl, spike, &hsbit1); // symlen=2
-                        bit = hsbit.hb;
-                    }
-                    if ( bitQ == EOF ) { break; }
-
-                    gpx.frame_bits[pos] = 0x31 ^ (bit0 ^ bit);
-                    pos++;
-                    bit0 = bit;
-                    bitpos += 1;
-                }
-                gpx.frame_bits[pos] = '\0';
-                print_frame(&gpx, pos, 1);
-                if (pos < BITFRAME_LEN) break;
-
-                header_found = 0;
-
-                // bis Ende der Sekunde vorspulen; allerdings Doppel-Frame alle 10 sek
-                // M20 only single frame ... AUX ?
-                if (gpx.option.vbs < 3) { // && (regulare frame) // print_frame-return?
-                    while ( bitpos < 5*BITFRAME_LEN ) {
-                        if (option_softin) {
-                            float s = 0.0;
-                            bitQ = f32soft_read(fp, &s);
-                        }
-                        else {
-                            bitQ = read_slbit(&dsp, &bit, 0, bitofs, bitpos, -1, 0); // symlen=2
-                        }
-                        if (bitQ == EOF) break;
-                        bitpos++;
-                    }
-                }
-
-                pos = 0;
-            }
-        }
-
-        if (!option_softin) free_buffers(&dsp);
-        else {
-            if (hdb.buf) { free(hdb.buf); hdb.buf = NULL; }
-        }
-    }
-    else //if (rawhex)
+    bitQ = 0;
+    while ( 1 && bitQ != EOF )
     {
-        char buffer_rawhex[2*(FRAME_LEN+AUX_LEN)+12];
-        char *pbuf = NULL, *buf_sp = NULL;
-        ui8_t frmbyte;
-        int frameofs = 0, len, i;
+        header_found = find_header(&dsp, thres, 2, bitofs, dsp.opt_dc);
+        _mv = dsp.mv;
 
-        while (1 > 0) {
+        if (header_found == EOF) break;
 
-            memset(buffer_rawhex, 0, 2*(FRAME_LEN+AUX_LEN)+12);
-            pbuf = fgets(buffer_rawhex, 2*(FRAME_LEN+AUX_LEN)+12, fp);
-            if (pbuf == NULL) break;
-            buffer_rawhex[2*(FRAME_LEN+AUX_LEN)] = '\0';
-            buf_sp = strchr(buffer_rawhex, ' ');
-            if (buf_sp != NULL && buf_sp-buffer_rawhex < 2*(FRAME_LEN+AUX_LEN)) {
-                buffer_rawhex[buf_sp-buffer_rawhex] = '\0';
-                for (i = buf_sp-buffer_rawhex+1; i < 2*(FRAME_LEN+AUX_LEN); i++) buffer_rawhex[i] = '\0';
-            }
-            len = strlen(buffer_rawhex) / 2;
-            if (len > pos_GPSweek+2) {
-                for (i = 0; i < len; i++) { //%2x  SCNx8=%hhx(inttypes.h)
-                    sscanf(buffer_rawhex+2*i, "%2hhx", &frmbyte);
-                    // wenn ohne %hhx: sscanf(buffer_rawhex+rawhex*i, "%2x", &byte); frame[frameofs+i] = (ui8_t)byte;
-                    gpx.frame_bytes[frameofs+i] = frmbyte;
+        // mv == correlation score
+        if (_mv*(0.5-gpx.option.inv) < 0) {
+            gpx.option.inv ^= 0x1;  // M10: irrelevant
+        }
+
+        if (header_found) {
+
+            bitpos = 0;
+            pos = 0;
+            pos /= 2;
+            bit0 = '0'; // oder: _mv[j] > 0
+
+            while ( pos < BITFRAME_LEN+BITAUX_LEN ) {
+
+                if (option_iq >= 2) {
+                    float bl = -1;
+                    if (option_iq > 2) bl = 4.0;
+                    bitQ = read_slbit(&dsp, &bit, 0/*gpx.option.inv*/, bitofs, bitpos, bl, 0);
                 }
-                print_frame(&gpx, len*8, 0);
+                else {
+                    bitQ = read_slbit(&dsp, &bit, 0/*gpx.option.inv*/, bitofs, bitpos, -1, spike); // symlen=2
+                }
+
+                if ( bitQ == EOF ) { break; }
+
+                gpx.frame_bits[pos] = 0x31 ^ (bit0 ^ bit);
+                pos++;
+                bit0 = bit;
+                bitpos += 1;
             }
+            gpx.frame_bits[pos] = '\0';
+            print_frame(&gpx, pos, &dsp);
+            if (pos < BITFRAME_LEN) break;
+
+            header_found = 0;
+
+            // bis Ende der Sekunde vorspulen; allerdings Doppel-Frame alle 10 sek
+            // M20 only single frame ... AUX ?
+            if (gpx.option.vbs < 3) { // && (regulare frame) // print_frame-return?
+                while ( bitpos < 5*BITFRAME_LEN ) {
+                    bitQ = read_slbit(&dsp, &bit, 0/*gpx.option.inv*/, bitofs, bitpos, -1, spike); // symlen=2
+                    if ( bitQ == EOF) break;
+                    bitpos++;
+                }
+            }
+
+            pos = 0;
         }
     }
 
-    if (gpx.option.jsn==2) fprintf(stdout, "\n]\n");
-    fclose(fp);
+    free_buffers(&dsp);
 
-    return 0;
+exit_thread:
+    reset_blockread(&dsp);
+    (dsp.thd)->used = 0;
+
+    return NULL;
 }
 
