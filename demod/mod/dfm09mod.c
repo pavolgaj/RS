@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <signal.h>
 
 #ifdef CYGWIN
   #include <fcntl.h>  // cygwin: _setmode()
@@ -144,6 +145,13 @@ static char dfm_header[] = "0100010111001111";
 /* ------------------------------------------------------------------------------------ */
 
 #define BAUD_RATE   2500
+
+int first=1;  //first frame or not 1/0
+
+void sig_handler(int sig) {
+    if (sig == SIGINT) { fprintf(stdout, "\n]\n"); }
+    exit(1); 
+} 
 
 /* ------------------------------------------------------------------------------------ */
 static int datetime2GPSweek(int yy, int mm, int dd,
@@ -973,7 +981,7 @@ static void print_gpx(gpx_t *gpx) {
             }
             printf("\n");
         }
-        else if (!gpx->option.raw) {
+        else if ((!gpx->option.raw) && gpx->option.jsn<2) {
             if (gpx->option.aut && gpx->option.vbs >= 2) printf("<%c> ", gpx->option.inv?'-':'+');
             printf("[%3d] ", gpx->frnr);
             printf("%4d-%02d-%02d ", gpx->jahr, gpx->monat, gpx->tag);
@@ -1094,6 +1102,9 @@ static void print_gpx(gpx_t *gpx) {
             int _sats = gpx->gps.nSV;
             if (_sats == 0 /*&& sonde_type == 6*/) _sats = gpx->gps.nPRN;
             // Print JSON blob     // valid sonde_ID?
+            
+            if ((!first) && (gpx->option.jsn==2)) {fprintf(stdout, ",\n"); }
+            first=0;
             printf("{ \"type\": \"%s\"", "DFM");
             printf(", \"frame\": %u, ", gpx->sec_gps); // gpx->frnr
             printf("\"id\": \"%s\", \"datetime\": \"%04d-%02d-%02dT%02d:%02d:%06.3fZ\", \"lat\": %.5f, \"lon\": %.5f, \"alt\": %.5f, \"vel_h\": %.5f, \"heading\": %.5f, \"vel_v\": %.5f, \"sats\": %d",
@@ -1135,8 +1146,8 @@ static void print_gpx(gpx_t *gpx) {
                 ver_jsn = VER_JSN_STR;
             #endif
             if (ver_jsn && *ver_jsn != '\0') printf(", \"version\": \"%s\"", ver_jsn);
-            printf(" }\n");
-            printf("\n");
+            printf(" }");
+            if (gpx->option.jsn==1) {fprintf(stdout, "\n");}
         }
 
     }
@@ -1382,6 +1393,10 @@ int main(int argc, char **argv) {
             option_json = 1; 
             if (option_ecc==0) {option_ecc = 1;} 
             }
+        else if   (strcmp(*argv, "--json2") == 0) { 
+            if (option_ecc==0) {option_ecc = 1;} 
+            option_json = 2; 
+        }
         else if   (strcmp(*argv, "--jsn_cfq") == 0) {
             int frq = -1;  // center frequency / Hz
             ++argv;
@@ -1487,7 +1502,7 @@ int main(int argc, char **argv) {
     // produce wrong codewords. hence ecc2 is not recommended
     // for reliable frame decoding.
     //
-    if ( option_dist || option_json ) option_ecc = 1;
+    if ( option_dist ) option_ecc = 1;
 
 
     if (option_ecc)
@@ -1530,6 +1545,11 @@ int main(int argc, char **argv) {
         fprintf(stderr, "reading float32 soft symbols\n");
     }
     #endif
+    
+    if (gpx.option.jsn==2) {
+        fprintf(stdout, "[\n");
+        signal(SIGINT, sig_handler);
+    }
 
 
     if (!rawhex) {
@@ -1787,7 +1807,7 @@ int main(int argc, char **argv) {
         }
     }
 
-
+    if (gpx.option.jsn==2) fprintf(stdout, "\n]\n");
     fclose(fp);
 
     return 0;
