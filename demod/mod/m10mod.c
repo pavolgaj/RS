@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <signal.h>
 
 #ifdef CYGWIN
   #include <fcntl.h>  // cygwin: _setmode()
@@ -109,6 +110,7 @@ typedef struct {
     ui8_t type;
 } gpx_t;
 
+int first=1;  //first frame or not 1/0
 
 /* -------------------------------------------------------------------------- */
 #define SECONDS_IN_WEEK  (604800.0)  // 7*86400
@@ -117,6 +119,12 @@ typedef struct {
  * - Adapted from sci.astro FAQ.
  * - Ignores UTC leap seconds.
  */
+ 
+void sig_handler(int sig) {
+    if (sig == SIGINT) { fprintf(stdout, "\n]\n"); }
+    exit(1); 
+} 
+ 
 static void Gps2Date(long GpsWeek, long GpsSeconds, int *Year, int *Month, int *Day) {
 
     long GpsDays, Mjd;
@@ -998,7 +1006,9 @@ static int print_pos(gpx_t *gpx, int csOK) {
                 strncpy(sn_id+4, gpx->SN, 12);
                 sn_id[15] = '\0';
                 for (j = 0; sn_id[j]; j++) { if (sn_id[j] == ' ') sn_id[j] = '-'; }
-
+                
+                if ((!first) && (gpx->option.jsn==2)) {fprintf(stdout, ",\n"); }
+                first=0;
                 fprintf(stdout, "{ \"type\": \"%s\"", "M10");
                 fprintf(stdout, ", \"frame\": %lu, ", (unsigned long)(sec_gps0+0.5));
                 fprintf(stdout, "\"id\": \"%s\", \"datetime\": \"%04d-%02d-%02dT%02d:%02d:%06.3fZ\", \"lat\": %.5f, \"lon\": %.5f, \"alt\": %.5f, \"vel_h\": %.5f, \"heading\": %.5f, \"vel_v\": %.5f",
@@ -1037,7 +1047,7 @@ static int print_pos(gpx_t *gpx, int csOK) {
                 #endif
                 if (ver_jsn && *ver_jsn != '\0') fprintf(stdout, ", \"version\": \"%s\"", ver_jsn);
                 fprintf(stdout, " }\n");
-                fprintf(stdout, "\n");
+                if (gpx->option.jsn==1) {fprintf(stdout, "\n");}
             }
         }
 
@@ -1280,6 +1290,10 @@ int main(int argc, char **argv) {
             option_min = 1;
         }
         else if   (strcmp(*argv, "--json") == 0) { gpx.option.jsn = 1; }
+        else if   (strcmp(*argv, "--json2") == 0) { 
+            gpx.option.jsn = 2; 
+            gpx.option.slt = 1;
+        }
         else if   (strcmp(*argv, "--jsn_cfq") == 0) {
             int frq = -1;  // center frequency / Hz
             ++argv;
@@ -1336,6 +1350,11 @@ int main(int argc, char **argv) {
         fprintf(stderr, "reading float32 soft symbols\n");
     }
     #endif
+    
+    if (gpx.option.jsn==2) {
+        fprintf(stdout, "[\n");
+        signal(SIGINT, sig_handler);
+    }
 
     if (!rawhex) {
         if (!option_softin) {
@@ -1545,6 +1564,7 @@ int main(int argc, char **argv) {
         }
     }
 
+    if (gpx.option.jsn==2) fprintf(stdout, "\n]\n");
     fclose(fp);
 
     return 0;
