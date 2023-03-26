@@ -1046,7 +1046,7 @@ static int print_pos(gpx_t *gpx, int csOK) {
                     ver_jsn = VER_JSN_STR;
                 #endif
                 if (ver_jsn && *ver_jsn != '\0') fprintf(stdout, ", \"version\": \"%s\"", ver_jsn);
-                fprintf(stdout, " }\n");
+                fprintf(stdout, " }");
                 if (gpx->option.jsn==1) {fprintf(stdout, "\n");}
             }
         }
