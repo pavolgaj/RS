@@ -42,6 +42,7 @@ typedef struct {
     i8_t ecc;  // Reed-Solomon ECC
     i8_t sat;  // GPS sat data
     i8_t ptu;  // PTU: temperature
+    i8_t dwp;  // PTU derived: dew point
     i8_t inv;
     i8_t aut;
     i8_t col;  // colors
@@ -917,12 +918,23 @@ static int print_pos(gpx_t *gpx, int csOK) {
             }
             if (gpx->option.ptu && csOK) {
                 if (gpx->T > -270.0) fprintf(stdout, "  T=%.1fC", gpx->T);
-                if (gpx->option.vbs >= 2) { if (gpx->_RH > -0.5) fprintf(stdout, " _RH=%.0f%%", gpx->_RH); }
+                if (gpx->_RH > -0.5) fprintf(stdout, " RH=%.0f%%", gpx->_RH); 
                 if (gpx->option.vbs >= 3) {
                     float t2 = get_Tntc2(gpx);
                     float fq555 = get_TLC555freq(gpx);
                     fprintf(stdout, "  (Ti:%.1fC)", gpx->Ti);
                     if (t2 > -270.0) fprintf(stdout, " (T2:%.1fC) (%.3fkHz)", t2, fq555/1e3);
+                }
+                // dew point
+                if (gpx->option.dwp)
+                {
+                    float rh = gpx->_RH;
+                    float Td = -273.15f; // dew point Td
+                    if (rh > 0.0f && gpx->T > -273.0f) {
+                        float gamma = logf(rh / 100.0f) + (17.625f * gpx->T / (243.04f + gpx->T));
+                        Td = 243.04f * gamma / (17.625f - gamma);
+                        fprintf(stdout, " Td=%.1fC ", Td);
+                    }
                 }
             }
             if (gpx->option.vbs >= 3 && csOK) {
@@ -954,12 +966,23 @@ static int print_pos(gpx_t *gpx, int csOK) {
             }
             if (gpx->option.ptu && csOK) {
                 if (gpx->T > -270.0) fprintf(stdout, "  T=%.1fC", gpx->T);
-                if (gpx->option.vbs >= 2) { if (gpx->_RH > -0.5) fprintf(stdout, " _RH=%.0f%%", gpx->_RH); }
+                if (gpx->_RH > -0.5) fprintf(stdout, " RH=%.0f%%", gpx->_RH); 
                 if (gpx->option.vbs >= 3) {
                     float t2 = get_Tntc2(gpx);
                     float fq555 = get_TLC555freq(gpx);
                     fprintf(stdout, "  (Ti:%.1fC)", gpx->Ti);
                     if (t2 > -270.0) fprintf(stdout, " (T2:%.1fC) (%.3fkHz)", t2, fq555/1e3);
+                }
+                // dew point
+                if (gpx->option.dwp)
+                {
+                    float rh = gpx->_RH;
+                    float Td = -273.15f; // dew point Td
+                    if (rh > 0.0f && gpx->T > -273.0f) {
+                        float gamma = logf(rh / 100.0f) + (17.625f * gpx->T / (243.04f + gpx->T));
+                        Td = 243.04f * gamma / (17.625f - gamma);
+                        fprintf(stdout, " Td=%.1fC ", Td);
+                    }
                 }
             }
             if (gpx->option.vbs >= 3 && csOK) {
@@ -1026,8 +1049,17 @@ static int print_pos(gpx_t *gpx, int csOK) {
                 // temperature (and humidity)
                 if (gpx->option.ptu) {
                     if (gpx->T > -273.0) fprintf(stdout, ", \"temp\": %.1f", gpx->T);
-                    if (gpx->option.vbs >= 2) {
-                        if (gpx->_RH > -0.5) fprintf(stdout, ", \"humidity\": %.1f", gpx->_RH);
+                    if (gpx->_RH > -0.5) fprintf(stdout, ", \"humidity\": %.1f", gpx->_RH);
+                    // dew point
+                    if (gpx->option.dwp)
+                    {
+                        float rh = gpx->_RH;
+                        float Td = -273.15f; // dew point Td
+                        if (rh > 0.0f && gpx->T > -273.0f) {
+                            float gamma = logf(rh / 100.0f) + (17.625f * gpx->T / (243.04f + gpx->T));
+                            Td = 243.04f * gamma / (17.625f - gamma);
+                            fprintf(stdout, ", \"dew\": %.1f", Td);
+                        }
                     }
                 }
                 fprintf(stdout, ", \"rawid\": \"M10_%02X%02X%02X%02X%02X\"", gpx->frame_bytes[pos_SN], gpx->frame_bytes[pos_SN+1],
@@ -1237,6 +1269,7 @@ int main(int argc, char **argv) {
         else if ( (strcmp(*argv, "--ptu") == 0) ) {
             gpx.option.ptu = 1;
         }
+        else if   (strcmp(*argv, "--dewp") == 0) { gpx.option.dwp = 1; }
         else if ( (strcmp(*argv, "--spike") == 0) ) {
             spike = 1;
         }
