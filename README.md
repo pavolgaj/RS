@@ -17,8 +17,14 @@ RS
   `RS/mk2a`: MkIIa (LMS6-1680MHz) <br />
   `RS/meisei`: Meisei (iMS-100, RS-11G) <br />
 
-  `RS/demod/mod`: alternative decoders using cross-correlation for header-synchronization <br />
-  &nbsp;&nbsp;&nbsp;&nbsp; RS41, M10, M20, DFM-06/09/17, LMS6-403, Meisei (iMS-100, RS-11G), iMet-54, RS92-SGP
+  `RS/demod/mod`: alternative decoders using cross-correlation for header-synchronization, FM/IQ data;<br />
+  &nbsp;&nbsp;&nbsp;&nbsp; RS41, M10/M20, DFM-06/09/17, LMS6-403, Meisei (iMS-100, RS-11G), iMet-54, RS92-SGP, MRZ-N1, MTS01
+
+
+  `RS/tree/test/uaii2022`: [UAII2022](https://github.com/rs1729/RS/tree/test/uaii2022): CF-06AH, HT03G, WxR-301D, PS-B3, ATMS-3710 <br />
+
+  `RS/tree/test/weathex`: Weathex w/o PN9 <br />
+
 
   `RS/ecc`: error correction codes (Reed-Solomon/BCH) <br />
 
@@ -45,25 +51,25 @@ wird DFT verwendet). Je nach Empfangsgeraet oder SDR-Software kann das Signal in
 
 * erläuternde Beiträge:
 
-  http://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=525#p50955  
-  http://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=550#p64707  
-  http://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=700#p75202  
-  http://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=1000#p87987  
-  http://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=1000#p88325  
-  http://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=1000#p88845  
-  http://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=1850#p155677  
-  http://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=1975#p163997  
-  http://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=2300#p193107  
-  https://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=2325#p196322  
-  https://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=2400#p198064  
-  https://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=2400#p198380  
-  https://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=2425#p203315  
-  https://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=2825#p235868  
-  https://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=2875#p245177  
-  https://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=2950#p272805  
-  https://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=3050#p336249  
-  https://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=3100#p354503  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=50955#p50955  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=64707#p64707  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=75202#p75202  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=87987#p87987  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=88325#p88325  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=88845#p88845  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=155677#p155677  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=163997#p163997  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=193107#p193107  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=196322#p196322  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=198064#p198064  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=198380#p198380  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=203315#p203315  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=235868#p235868  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=245177#p245177  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=272805#p272805  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=336249#p336249  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=354503#p354503  
   https://github.com/rs1729/RS/issues/32#issuecomment-792334791  
-  https://www.fingers-welt.de/phpBB/viewtopic.php?f=14&t=43&start=3125#p409627  
+  https://www.fingers-welt.de/phpBB/viewtopic.php?p=409627#p409627  
 
 
