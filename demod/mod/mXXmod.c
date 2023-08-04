@@ -823,11 +823,12 @@ static int print_pos(gpx_t *gpx, int bcOK, int csOK) {
                 }
                 if (gpx->option.vbs >= 1) {
                     fprintf(stdout, "  # ");
-                    //if (bcOK) fprintf(stdout, " (ok)"); else fprintf(stdout, " (no)");
-                    if      (bcOK > 0) fprintf(stdout, " (ok)");
-                    else if (bcOK < 0) fprintf(stdout, " (oo)");
-                    else               fprintf(stdout, " (no)");
-                    //
+                    if (gpx->fwVer < 0x07) {
+                        //if (bcOK) fprintf(stdout, " (ok)"); else fprintf(stdout, " (no)");
+                        if      (bcOK > 0) fprintf(stdout, " (ok)");
+                        else if (bcOK < 0) fprintf(stdout, " (oo)");
+                        else               fprintf(stdout, " (no)");
+                    }
                     if (csOK) fprintf(stdout, " [OK]"); else fprintf(stdout, " [NO]");
                 }
                 if (gpx->option.ptu && csOK) {
@@ -853,6 +854,9 @@ static int print_pos(gpx_t *gpx, int bcOK, int csOK) {
                             fprintf(stdout, " Td=%.1fC ", Td);
                         }
                     }
+                }
+                if (gpx->option.vbs >= 3 && csOK) {
+                    fprintf(stdout, " (bat:%.2fV)", gpx->batV);
                 }
             }
             if (gpx->option.vbs >= 3 && csOK) {
