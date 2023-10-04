@@ -1,0 +1,1 @@
+rtl_fm  -M raw -s 48k -f 400.6M -g 32 -E dc | ./dfm09mod --ecc2 -i --rawecc  | tee -a dfm09_raw_`date +%Y%m%d-%H%M%S`.txt | ./dfm09mod --ecc2 --ptu -vx --rawhex | tee -a dfm09_data_`date +%Y%m%d-%H%M%S`.txt

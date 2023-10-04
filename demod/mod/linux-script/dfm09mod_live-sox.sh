@@ -1,0 +1,1 @@
+sox -t alsa default -t wav - 2>/dev/null | ./dfm09mod --ecc2 -i --rawecc  | tee -a dfm09_raw_`date +%Y%m%d-%H%M%S`.txt | ./dfm09mod --ecc2 --ptu -vx --rawhex | tee -a dfm09_data_`date +%Y%m%d-%H%M%S`.txt
