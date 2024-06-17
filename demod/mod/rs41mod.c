@@ -2297,6 +2297,7 @@ int main(int argc, char *argv[]) {
             if (*argv) frq = atoi(*argv); else return -1;
             if (frq < 300000000) frq = -1;
             cfreq = frq;
+        }
         else if   (strcmp(*argv, "--jsnsubfrm1") == 0) { gpx.option.cal = 1; }  // json cal/conf
         else if   (strcmp(*argv, "--jsnsubfrm2") == 0) { gpx.option.cal = 2; }  // json cal/conf
         else if   (strcmp(*argv, "--rawhex") == 0) { rawhex = 2; }  // raw hex input
