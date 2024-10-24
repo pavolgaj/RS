@@ -1387,7 +1387,8 @@ int main(int argc, char **argv) {
         }
         else if   (strcmp(*argv, "--auto") == 0) { option_auto = 1; }
         else if   (strcmp(*argv, "--bin") == 0) { option_bin = 1; }  // bit/byte binary input
-        else if   (strcmp(*argv, "--softin") == 0) { option_softin = 1; }  // float32 soft input
+        else if   (strcmp(*argv, "--softin") == 0)  { option_softin = 1; }  // float32 soft input
+        else if   (strcmp(*argv, "--softinv") == 0) { option_softin = 2; }  // float32 inverted soft input
         else if   (strcmp(*argv, "--dist") == 0) { 
             option_dist = 1; 
             if (option_ecc==0) {option_ecc = 1;} 
@@ -1654,7 +1655,7 @@ int main(int argc, char **argv) {
                 hdrcnt += nfrms;
             }
             else if (option_softin) {
-                header_found = find_softbinhead(fp, &hdb, &_mv);
+                header_found = find_softbinhead(fp, &hdb, &_mv, option_softin == 2);
                 hdrcnt += nfrms;
             }
             else {                                    //2 (false positive)      // FM-audio:
@@ -1703,9 +1704,9 @@ int main(int argc, char **argv) {
                             float s1 = 0.0;
                             float s2 = 0.0;
                             float s  = 0.0;
-                            bitQ = f32soft_read(fp, &s1);
+                            bitQ = f32soft_read(fp, &s1, option_softin == 2);
                             if (bitQ != EOF) {
-                                bitQ = f32soft_read(fp, &s2);
+                                bitQ = f32soft_read(fp, &s2, option_softin == 2);
                                 if (bitQ != EOF) {
                                     s = s2-s1; // integrate both symbols  // only 2nd Manchester symbol: s2
                                     hsbit.sb = s;
