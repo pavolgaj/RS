@@ -102,10 +102,19 @@ typedef struct {
 } ecdat_t;
 
 typedef struct {
+    ui8_t id168;
+    ui8_t status;
+} gnss_t;
+
+typedef struct {
     int out;
     int frnr;
     char id[9];
     ui8_t numSV;
+    ui8_t gnss_numSVb168;
+    ui8_t gnss_nSVstatus;
+    gnss_t gnss_sv[32];
+    ui8_t isUTC;
     int week; int tow_ms; int gpssec;
     int jahr; int monat; int tag;
     int wday;
@@ -394,6 +403,12 @@ GPS chip: ublox UBX-G6010-ST
 #define pck_SGM_xTU    0x7F1B  // temperature/humidity
 #define pck_SGM_CRYPT  0x80A7  // Packet type for an Encrypted payload
 
+// fw 0x50dd
+#define pck_960A              0x960A  //
+#define pck_8226_POSDATETIME  0x8226  // ECEF-POS/VEL , DATE/TIME
+#define pck_8329_SATS         0x8329  // GNSS sats
+
+
 /*
   frame[pos_FRAME-1] == 0x0F: len == NDATA_LEN(320)
   frame[pos_FRAME-1] == 0xF0: len == FRAME_LEN(518)
@@ -481,6 +496,10 @@ static int get_SondeID(gpx_t *gpx, int crc, int ofs) {
             gpx->lat = 0.0; gpx->lon = 0.0; gpx->alt = 0.0;
             gpx->vH  = 0.0; gpx->vD  = 0.0; gpx->vV  = 0.0;
             gpx->numSV = 0;
+            gpx->gnss_numSVb168 = 0;
+            gpx->gnss_nSVstatus = 0;
+            memset(gpx->gnss_sv, 0, 32*sizeof(gnss_t)); // gpx->gnss_sv[i].id168 = 0; gpx->gnss_sv[i].status = 0;
+            gpx->isUTC = 0;
             gpx->T = -273.15f;
             gpx->RH = -1.0f;
             gpx->P = -1.0f;
@@ -671,7 +690,7 @@ static float get_RH2adv(gpx_t *gpx, ui32_t f, ui32_t f1, ui32_t f2, float T, flo
 
     bk = 1.0;
     for (k = 0; k < 6; k++) {
-        b[k] = bk;
+        b[k] = bk;  // Tp^k
         bk *= Trh_20_180;
     }
 
@@ -681,10 +700,12 @@ static float get_RH2adv(gpx_t *gpx, ui32_t f, ui32_t f1, ui32_t f2, float T, flo
         double _cpj = 1.0;
         double corrCp = 0.0;
         double bt, bp[3];
+
         for (j = 0; j < 3; j++) {
             bp[j] = gpx->ptu_corHp[j] * (_p/(1.0 + gpx->ptu_corHp[j]*_p) - _cpj/(1.0 + gpx->ptu_corHp[j]));
             _cpj *= Cp; // Cp^j
         }
+
         corrCp = 0.0;
         for (j = 0; j < 3; j++) {
             bt = 0.0;
@@ -695,6 +716,7 @@ static float get_RH2adv(gpx_t *gpx, ui32_t f, ui32_t f1, ui32_t f2, float T, flo
         }
         Cp -= corrCp;
     }
+
     aj = 1.0;
     for (j = 0; j < 7; j++) {
         for (k = 0; k < 6; k++) {
@@ -738,8 +760,11 @@ static float get_P(gpx_t *gpx, ui32_t f, ui32_t f1, ui32_t f2, int fx)
     return (float)p;
 }
 // ---------------------------------------------------------------------------------------
+//
+// barometric formula https://en.wikipedia.org/wiki/Barometric_formula
 static float Ph(float h) {
     double Pb, Tb, Lb, hb;
+	//double RgM = 8.31446/(9.80665*0.0289644);
 	double gMR = 9.80665*0.0289644/8.31446;
 	float P = 0.0;
 
@@ -768,10 +793,14 @@ static float Ph(float h) {
         hb = 0.0;
     }
 
+    //if (Lb == 0.0) altP = -RgM*Tb * log(P/Pb) + hb;
+    //else           altP = Tb/Lb * (pow(P/Pb, -RgM*Lb)-1.0) + hb;
     if (Lb == 0.0) P = Pb * exp( -gMR*(h-hb)/Tb );
     else           P = Pb * pow( 1.0+Lb*(h-hb)/Tb , -gMR/Lb);
+
     return P;
 }
+
 static int get_PTU(gpx_t *gpx, int ofs, int pck, int valid_alt) {
     int err=0, i;
     int bR, bc1, bT1,
@@ -943,6 +972,7 @@ static int get_GPStime(gpx_t *gpx, int ofs) {
     gpx->std =  gpstime / 3600;
     gpx->min = (gpstime % 3600) / 60;
     gpx->sek =  gpstime % 60 + ms/1000.0;
+    gpx->isUTC = 0;
 
     return 0;
 }
@@ -957,6 +987,7 @@ static int get_GPS1(gpx_t *gpx, int ofs) {
         // reset GPS1-data (json)
         gpx->jahr = 0; gpx->monat = 0; gpx->tag = 0;
         gpx->std = 0; gpx->min = 0; gpx->sek = 0.0;
+        gpx->isUTC = 0;
         return -1;
     }
 
@@ -1006,7 +1037,7 @@ static void ecef2elli(double X[], double *lat, double *lon, double *alt) {
     *lon = lam*180/M_PI;
 }
 
-static int get_GPSkoord(gpx_t *gpx, int ofs) {
+static int get_ECEFkoord(gpx_t *gpx, int pos_ecef) {
     int i, k;
     unsigned byte;
     ui8_t XYZ_bytes[4];
@@ -1022,14 +1053,14 @@ static int get_GPSkoord(gpx_t *gpx, int ofs) {
     for (k = 0; k < 3; k++) {
 
         for (i = 0; i < 4; i++) {
-            byte = gpx->frame[pos_GPSecefX+ofs + 4*k + i];
+            byte = gpx->frame[pos_ecef + 4*k + i];
             XYZ_bytes[i] = byte;
         }
         memcpy(&XYZ, XYZ_bytes, 4);
         X[k] = XYZ / 100.0;
 
         for (i = 0; i < 2; i++) {
-            byte = gpx->frame[pos_GPSecefV+ofs + 2*k + i];
+            byte = gpx->frame[pos_ecef+12 + 2*k + i];
             gpsVel_bytes[i] = byte;
         }
         vel16 = gpsVel_bytes[0] | gpsVel_bytes[1] << 8;
@@ -1069,9 +1100,10 @@ static int get_GPSkoord(gpx_t *gpx, int ofs) {
 
     gpx->vV = vU;
 
-    gpx->numSV = gpx->frame[pos_numSats+ofs];
+    // CHANGE
+    /* gpx->numSV = gpx->frame[pos_numSats+ofs];
     gpx->pDOP = gpx->frame[pos_pDOP+ofs]/10.0; if (gpx->frame[pos_pDOP+ofs] == 0xFF) gpx->pDOP = -1.0;
-    gpx->sAcc = gpx->frame[pos_sAcc+ofs]/10.0; if (gpx->frame[pos_sAcc+ofs] == 0xFF) gpx->sAcc = -1.0;
+    gpx->sAcc = gpx->frame[pos_sAcc+ofs]/10.0; if (gpx->frame[pos_sAcc+ofs] == 0xFF) gpx->sAcc = -1.0; */
 
     return 0;
 }
@@ -1089,18 +1121,368 @@ static int get_GPS3(gpx_t *gpx, int ofs) {
         gpx->numSV = 0;
         return -1;
     }
+    // pos_GPS3+2 = pos_GPSecefX
+    err |= get_ECEFkoord(gpx, pos_GPS3+ofs+2); // plausibility-check: altitude, if ecef=(0,0,0)
 
-    err |= get_GPSkoord(gpx, ofs); // plausibility-check: altitude, if ecef=(0,0,0)
+    gpx->numSV = gpx->frame[pos_numSats+ofs];
 
     return err;
 }
 
+// GNSS1=8226
+static int get_posdatetime(gpx_t *gpx, int pos_posdatetime) {
+    int err=0;
+
+    err = check_CRC(gpx, pos_posdatetime, pck_8226_POSDATETIME);
+    if (err) {
+        ///TODO: fw 0x50dd , ec < 0
+        gpx->crc |= crc_GPS1 | crc_GPS3;
+        // reset GPS1-data (json)
+        gpx->jahr = 0; gpx->monat = 0; gpx->tag = 0;
+        gpx->std = 0; gpx->min = 0; gpx->sek = 0.0;
+        gpx->isUTC = 0;
+        // reset GPS3-data (json)
+        gpx->lat = 0.0; gpx->lon = 0.0; gpx->alt = 0.0;
+        gpx->vH  = 0.0; gpx->vD  = 0.0; gpx->vV  = 0.0;
+        gpx->numSV = 0;
+        return -1;
+    }
+
+    // ublox M10 UBX-NAV-POSECEF (0x01 0x01) ?
+    err |= get_ECEFkoord(gpx, pos_posdatetime+2); // plausibility-check: altitude, if ecef=(0,0,0)
+
+    // ublox M10 UBX-NAV-PVT (0x01 0x07) ? (UTC)
+    // date
+    gpx->jahr  = gpx->frame[pos_posdatetime+20] | gpx->frame[pos_posdatetime+21]<<8;
+    gpx->monat = gpx->frame[pos_posdatetime+22];
+    gpx->tag   = gpx->frame[pos_posdatetime+23];
+    // time
+    gpx->std = gpx->frame[pos_posdatetime+24];
+    gpx->min = gpx->frame[pos_posdatetime+25];
+    gpx->sek = gpx->frame[pos_posdatetime+26];
+    if (gpx->frame[pos_posdatetime+27] < 100) gpx->sek += gpx->frame[pos_posdatetime+27]/100.0;
+    //
+    gpx->isUTC = 1;
+
+    ///TODO: numSV/fixOK
+    //gpx->numSV = gpx->frame[pos_numSats+ofs];
+
+    return err;
+}
+
+// GNSS2=8329
+static int get_gnssSVs(gpx_t *gpx, int pos_gnss2) {
+    int err=0;
+
+    memset(gpx->gnss_sv, 0, 32*sizeof(gnss_t));
+    gpx->gnss_numSVb168 = 0;
+    gpx->gnss_nSVstatus = 0;
+
+    err = check_CRC(gpx, pos_gnss2, pck_8329_SATS);
+
+    if (!err) {
+        // ublox M10 UBX-NAV-SAT (0x01 0x35) ?
+        // ublox M10 UBX-NAV-SIG (0x01 0x43) ?
+
+        // int pos_gnss1 = 161;
+        // int pos_gnss2 = 203; == pos_posgnss
+        // int pos_zero  = 248;
+
+        int cntSV168 = 0; // 21*8 bits
+        // 00..31: GPS, PRN+1
+        // 32..67: GALILEO, GAL_E + 31
+        for (int j = 0; j < 21; j++) {
+            int b = gpx->frame[pos_gnss2+2+4+j];
+            for (int n = 0; n < 8; n++) {  //DBG fprintf(stdout, "%d", (b>>n)&1);
+                int s = (b>>n)&1;
+                if (s) {
+                    ui8_t svid = j*8+n + 1;
+                    if (cntSV168 < 32) {
+                        gpx->gnss_sv[cntSV168].id168 = svid;
+                        //DBG fprintf(stdout, " %3d", svid);
+                    }
+                    cntSV168 += 1;
+                }
+            }
+        }
+        gpx->gnss_numSVb168 = cntSV168;
+
+        int cntSVstatus = 0; // max 16*2
+        for (int j = 0; j < 16; j++) {
+            ui8_t b = gpx->frame[pos_gnss2+2+4+21+j];
+            ui8_t b0 = b & 0xF;       // b & 0x0F
+            ui8_t b1 = (b>>4) & 0xF;  // b & 0xF0
+            gpx->gnss_sv[2*j  ].status = b0; if (b0) cntSVstatus++;
+            gpx->gnss_sv[2*j+1].status = b1; if (b1) cntSVstatus++;
+        }
+        gpx->gnss_nSVstatus = cntSVstatus;
+
+        //check: cntSV168 == cntSVstatus ?
+
+        ///TODO: numSV/fixOK
+        //       used in solution / tracked / searched / visible ?
+        gpx->numSV = gpx->gnss_nSVstatus; // == gpx->gnss_numSVb168 ?
+    }
+    else {
+        ///TODO: fw 0x50dd , ec < 0
+        gpx->crc |= crc_GPS2;
+    }
+
+    return err;
+}
+
+static int prn_gnss_sat2(gpx_t *gpx) {
+    int n;
+
+    fprintf(stdout, "\n");
+    fprintf(stdout, "  numSV168 : %2d", gpx->gnss_numSVb168);
+    fprintf(stdout, "  nSVstatus: %2d", gpx->gnss_nSVstatus);
+    // DBG fprintf(stdout, "  # %d #", gpx->nss_numSV168 - gpx->gnss_nSVstatus);
+    fprintf(stdout, "\n");
+    fprintf(stdout, "  SVids: ");
+    for (n = 0; n < 32; n++) {
+        if (n < gpx->gnss_numSVb168) fprintf(stdout, " %3d", gpx->gnss_sv[n].id168);
+        if (n < gpx->gnss_nSVstatus) fprintf(stdout, ":%X", gpx->gnss_sv[n].status);
+    }
+    fprintf(stdout, "\n");
+
+    for (n = 0; n < 32; n++) {
+        if (n < gpx->gnss_numSVb168 || n < gpx->gnss_nSVstatus) {
+            if (gpx->gnss_sv[n].id168 < 33) { // 01..32 (GPS ?)
+                ui8_t prnGPS = gpx->gnss_sv[n].id168;
+                if (n == 0 && gpx->gnss_sv[n].id168 < 33) fprintf(stdout, "  GPS: ");
+                //fprintf(stdout, "  GPS PRN%02d: %X\n", prnGPS, gpx->gnss_sv[n].status);
+                //fprintf(stdout, "  GPS PRN%02d", prnGPS);
+                fprintf(stdout, " PRN%02d", prnGPS);
+            }
+            else if (gpx->gnss_sv[n].id168 < 33+36) { // 33..68 -> 01..36 (GALILEO ??)
+                ui8_t prnGAL = gpx->gnss_sv[n].id168 - 32;
+                if (n == 0 || n > 0 && gpx->gnss_sv[n-1].id168 < 33) {
+                    if (n > 0) fprintf(stdout, "\n");
+                    fprintf(stdout, "  GAL: ");
+                }
+                //fprintf(stdout, "  GAL E%02d: %X\n", prnGAL, gpx->gnss_sv[n].status);
+                //fprintf(stdout, "  GAL E%02d", prnGAL);
+                fprintf(stdout, " E%02d", prnGAL);
+            }
+        }
+    }
+    fprintf(stdout, "\n");
+
+    return 0;
+}
+
+
+static int hex2uint(char *str, int nibs) {
+    int i;
+    int erg = 0;
+    int h = 0;
+
+    if (nibs > 7) return -2;
+
+    for (i = 0; i < nibs; i++) { // MSB i.e. most significant nibble first
+        if      (str[i] >= '0' && str[i] <= '9') h = str[i]-'0';
+        else if (str[i] >= 'a' && str[i] <= 'f') h = str[i]-'a'+0xA;
+        else if (str[i] >= 'A' && str[i] <= 'F') h = str[i]-'A'+0xA;
+        else return -1;
+        erg = (erg << 4) | (h & 0xF);
+    }
+    return erg;
+}
+
+static int prn_aux_IDx01(char *xdata) {
+// V7 ECC (Electrochemical Concentration Cell) Ozonesonde
+// https://gml.noaa.gov/aftp/user/jordan/iMet%20Radiosonde%20Protocol.pdf
+// https://harbor.weber.edu/Hardware/Ozonesonde/ECC_Ozonesonde-1.pdf
+// ID=0x01: ECC Ozonesonde
+// N=2*8  nibs (1byte = 2nibs) (MSB)
+//  0     2  u8   Instrument_type = 0x01 (ID)
+//  2     2  u8   Instrument_number
+//  4     4  u16  Icell, uA (I = n/1000)
+//  8     4  i16  Tpump, C (T = n/100)
+// 12     2  u8   Ipump, mA
+// 14     2  u8   Vbat, (V = n/10)
+//
+    int val;
+    i16_t Tpump;
+    ui16_t Icell;
+    ui8_t InstrNum, Ipump, Vbat;
+    char *px = xdata;
+    int N = 2*8;
+
+    if (*px) {
+
+        if (strncmp(px, "01", 2) != 0) {
+            px = strstr(xdata, "#01");
+            if (px == NULL) return -1;
+            else px += 1;
+        }
+        if (strlen(px) < N) return -1;
+
+        fprintf(stdout, " ID=0x01 ECC ");
+        val = hex2uint(px+ 2, 2);  if (val < 0) return -1;
+        InstrNum = val & 0xFF;
+        val = hex2uint(px+ 4, 4);  if (val < 0) return -1;
+        Icell = val & 0xFFFF; // u16
+        val = hex2uint(px+ 8, 4);  if (val < 0) return -1;
+        Tpump = val & 0xFFFF; // i16
+        val = hex2uint(px+12, 2);  if (val < 0) return -1;
+        Ipump = val & 0xFF;   // u8
+        val = hex2uint(px+14, 2);  if (val < 0) return -1;
+        Vbat  = val & 0xFF;   // u8
+        fprintf(stdout, " No.%d ", InstrNum);
+        fprintf(stdout, " Icell:%.3fuA ", Icell/1000.0);
+        fprintf(stdout, " Tpump:%.2fC ", Tpump/100.0);
+        fprintf(stdout, " Ipump:%dmA ", Ipump);
+        fprintf(stdout, " Vbat:%.1fV ", Vbat/10.0);
+    }
+    else {
+        return -2;
+    }
+
+    return 0;
+}
+
+static int prn_aux_IDx05(char *xdata) {
+// OIF411
+// "Ozone Sounding with Vaisala Radiosonde RS41" user's guide M211486EN
+//
+// ID=0x05: OIF411
+// pos    nibs (MSB)
+//  0     2  u8   Instrument_type = 0x05 (ID)
+//  2     2  u8   Instrument_number
+// Measurement Data, N=2*10
+//  4     4  i16  Tpump, C (T = n/100)
+//  8     5  u20  Icell, uA (I = n/10000)
+// 13     2  u8   Vbat, (V = n/10)
+// 15     3  u12  Ipump, mA
+// 18     2  u8   Vext, (V = n/10)
+// ID Data, N=2*10+1
+//  4     8  char OIF411 Serial
+// 12     4  u16  Diagnostics Word
+// 16   2?4  u16? SW version (n/100)
+// 20     1  char I
+//
+    char *px = xdata;
+    int N = 2*10;
+    int val;
+    ui8_t InstrNum;
+
+    if (*px) {
+
+        if (strncmp(px, "05", 2) != 0) {
+            px = strstr(xdata, "#05");
+            if (px == NULL) return -1;
+            else px += 1;
+        }
+        if (strlen(px) < N) return -1;
+
+        fprintf(stdout, " ID=0x05 OIF411 ");
+        val = hex2uint(px+ 2, 2);  if (val < 0) return -1;
+        InstrNum = val & 0xFF;
+        fprintf(stdout, " No.%d ", InstrNum);
+
+        if (px[N] == 'I') {
+            ui16_t dw;
+            ui16_t sw;
+            char sn[9];
+            // 5.2 ID Data
+            //
+            N += 1;
+            strncpy(sn, px+4, 8); sn[8] = '\0';
+            val = hex2uint(px+12, 4);  if (val < 0) return -1;
+            dw = val & 0xFFFF;  // i16
+            val = hex2uint(px+16, 4);  if (val < 0) return -1;
+            sw = val & 0xFFFF;  // u8
+            fprintf(stdout, " SN:%s ", sn);
+            fprintf(stdout, " DW:%04X ", dw);
+            fprintf(stdout, " SW:%.2f ", sw/100.0);
+            // Diagnostics Word dw
+            // 0000 = "Default value, no diagnostics bits active"
+            // 0004 = "Ozone pump temperature below -5C"
+            // 0400 = "Ozone pump battery voltage (+VBatt) is not connected to OIF411"
+            // 0404 = 0004 | 0400
+        }
+        else {
+            ui32_t Icell;
+            ui16_t Ipump;
+            i16_t Tpump;
+            ui8_t InstrNum, Vbat, Vext;
+            // 5.1 Measurement Data
+            //
+            val = hex2uint(px+ 4, 4);  if (val < 0) return -1;
+            Tpump = val & 0xFFFF;  // i16
+            val = hex2uint(px+ 8, 5);  if (val < 0) return -1;
+            Icell = val & 0xFFFFF; // u20
+            val = hex2uint(px+13, 2);  if (val < 0) return -1;
+            Vbat  = val & 0xFF;    // u8
+            val = hex2uint(px+15, 3);  if (val < 0) return -1;
+            Ipump = val & 0xFFF;   // u12
+            val = hex2uint(px+18, 2);  if (val < 0) return -1;
+            Vext  = val & 0xFF;    // u8
+            fprintf(stdout, " Tpump:%.2fC ", Tpump/100.0);
+            fprintf(stdout, " Icell:%.4fuA ", Icell/10000.0);
+            fprintf(stdout, " Vbat:%.1fV ", Vbat/10.0);
+            fprintf(stdout, " Ipump:%dmA ", Ipump);
+            fprintf(stdout, " Vext:%.1fV ", Vext/10.0);
+        }
+    }
+    else {
+        return -2;
+    }
+
+    return 0;
+}
+
+static int prn_aux_IDx08(char *xdata) {
+// CFH Cryogenic Frost Point Hygrometer
+// ID=0x08: CFH
+// N=2*12 nibs
+//  0     2  u8   Instrument_type = 0x08 (ID)
+//  2     2  u8   Instrument_number
+//  4     6       Tmir, Mirror Temperature
+// 10     6       Vopt, Optics Voltage
+// 16     4       Topt, Optics Temperature
+// 20     4       Vbat, CFH Battery
+//
+    char *px = xdata;
+    int N = 2*12;
+    int val;
+    ui8_t InstrNum;
+
+    if (*px) {
+
+        if (strncmp(px, "08", 2) != 0) {
+            px = strstr(xdata, "#08");
+            if (px == NULL) return -1;
+            else px += 1;
+        }
+        if (strlen(px) < N) return -1;
+
+        fprintf(stdout, " ID=0x08 CFH ");
+        val = hex2uint(px+ 2, 2);  if (val < 0) return -1;
+        InstrNum = val & 0xFF;
+        fprintf(stdout, " No.%d ", InstrNum);
+        fprintf(stdout, " Tmir:0x%.6s ", px+4);
+        fprintf(stdout, " Vopt:0x%.6s ", px+10);
+        fprintf(stdout, " Topt:0x%.4s ", px+16);
+        fprintf(stdout, " Vbat:0x%.4s ", px+20);
+
+    }
+    else {
+        return -2;
+    }
+
+    return 0;
+}
+
 static int get_Aux(gpx_t *gpx, int out, int pos) {
 //
-// "Ozone Sounding with Vaisala Radiosonde RS41" user's guide
+// "Ozone Sounding with Vaisala Radiosonde RS41" user's guide M211486EN
 //
     int auxlen, auxcrc, count7E, pos7E;
     int i, n;
+    char *paux;
 
     n = 0;
     count7E = 0;
@@ -1144,6 +1526,34 @@ static int get_Aux(gpx_t *gpx, int out, int pos) {
         }
     }
     gpx->xdata[n] = '\0';
+
+    // decode OIF411 xdata
+    paux = gpx->xdata;
+    if (out && gpx->option.aux && *paux)
+    {
+        int val;
+        ui8_t ID;
+        for (i = 0; i < count7E; i++) {
+            if (paux > gpx->xdata) {
+                //while (paux < (gpx->xdata)+n && *paux != '#') paux++;
+                while (*paux && *paux != '#') paux++;
+                paux++;
+            }
+            if (strlen(paux) > 2) {
+                val = hex2uint(paux, 2);
+                if (val < 0) { paux += 2; continue; }
+                ID = val & 0xFF;
+                switch (ID) {
+                    case 0x01: fprintf(stdout, "\n"); prn_aux_IDx01(paux); break;
+                    case 0x05: fprintf(stdout, "\n"); prn_aux_IDx05(paux); break;
+                    case 0x08: fprintf(stdout, "\n"); prn_aux_IDx08(paux); break;
+                }
+                paux++;
+            }
+            else break;
+        }
+        if ( !gpx->option.jsn ) fprintf(stdout, "\n");
+    }
 
     i = check_CRC(gpx, pos, pck_ZERO);  // 0x76xx: 00-padding block
     if (i) gpx->crc |= crc_ZERO;
@@ -1585,7 +1995,7 @@ static int prn_frm(gpx_t *gpx) {
 static int prn_ptu(gpx_t *gpx) {
     fprintf(stdout, " ");
     if (gpx->T > -273.0) fprintf(stdout, " T=%.1fC ", gpx->T);
-    if (gpx->RH > -0.5)  fprintf(stdout, " RH=%.0f%% ", gpx->RH);
+    if (gpx->RH > -0.5 && gpx->option.ptu != 2)  fprintf(stdout, " _RH=%.0f%% ", gpx->RH);
     if (gpx->P > 0.0) {
         if (gpx->P < 100.0) fprintf(stdout, " P=%.2fhPa ", gpx->P);
         else                fprintf(stdout, " P=%.1fhPa ", gpx->P);
@@ -1626,6 +2036,25 @@ static int prn_gpspos(gpx_t *gpx) {
     fprintf(stdout, " alt: %.2f ", gpx->alt);
     fprintf(stdout, "  vH: %4.1f  D: %5.1f  vV: %3.1f ", gpx->vH, gpx->vD, gpx->vV);
     if (gpx->option.vbs == 3) fprintf(stdout, " sats: %02d ", gpx->numSV);
+    return 0;
+}
+
+static int prn_posdatetime(gpx_t *gpx) {
+    //Gps2Date(gpx);
+    //fprintf(stdout, "%s ", weekday[gpx->wday]);
+    fprintf(stdout, "%04d-%02d-%02d %02d:%02d:%05.2f",
+            gpx->jahr, gpx->monat, gpx->tag, gpx->std, gpx->min, gpx->sek);
+    //if (gpx->option.vbs == 3) fprintf(stdout, " (W %d)", gpx->week);
+    fprintf(stdout, " ");
+
+    fprintf(stdout, " ");
+    fprintf(stdout, " lat: %.5f ", gpx->lat);
+    fprintf(stdout, " lon: %.5f ", gpx->lon);
+    fprintf(stdout, " alt: %.2f ", gpx->alt);
+    fprintf(stdout, "  vH: %4.1f  D: %5.1f  vV: %3.1f ", gpx->vH, gpx->vD, gpx->vV);
+
+    if (gpx->option.vbs == 3) fprintf(stdout, " sats: %02d ", gpx->numSV); ///TODO: used/tracked/searched/visible ?
+
     return 0;
 }
 
@@ -1705,7 +2134,8 @@ static int prn_sat3(gpx_t *gpx, int ofs) {
 
 static int print_position(gpx_t *gpx, int ec) {
     int i;
-    int err, err0, err1, err2, err3;
+    int err = 1;
+    int err0 = 1, err1 = 1, err2 = 1, err3 = 1, err13 = 1;
     //int output, out_mask;
     int encrypted = 0;
     int unexp = 0;
@@ -1713,6 +2143,7 @@ static int print_position(gpx_t *gpx, int ec) {
     int sat = 0;
     int pos_aux = 0, cnt_aux = 0;
     int ofs_ptu = 0, pck_ptu = 0;
+    int isGNSS2 = 0;
 
     //gpx->out = 0;
     gpx->aux = 0;
@@ -1812,6 +2243,23 @@ static int print_position(gpx_t *gpx, int ec) {
                             if (out) fprintf(stdout, " [%04X] (RS41-SGM) ", pck_SGM_CRYPT);
                             break;
 
+                    case pck_960A: // 0x960A
+                            // ? 64 bit data integrity and authenticity ?
+                            break;
+
+                    case pck_8226_POSDATETIME: // 0x8226
+                            err13 = get_posdatetime(gpx, pos);
+                            if ( !err13 ) {
+                                if (out) prn_posdatetime(gpx);
+                            }
+                            break;
+
+                    case pck_8329_SATS: // 0x8329
+                            err2 = get_gnssSVs(gpx, pos);
+                            isGNSS2 = 1;
+                            ////if ( !err2 ) { if (sat) prn_gnss_sat2(gpx); }
+                            break;
+
                     default:
                             if (blk == 0x7E) {
                                 if (pos_aux == 0) pos_aux = pos; // pos == pos_AUX ?
@@ -1854,35 +2302,36 @@ static int print_position(gpx_t *gpx, int ec) {
                 if (out && ec > 0 && pos > flen-1) fprintf(stdout, " (%d)", ec);
 
                 if (pos_aux && out && gpx->option.vbs > 1) fprintf(stdout, "\n # xdata = %s", gpx->xdata);
+				if (pos_aux) gpx->aux = get_Aux(gpx, out && gpx->option.vbs > 1, pos_aux);
 
                 gpx->crc = 0;
                 frm_end = FRAME_LEN-2;
 
+                if ( isGNSS2 ) {
+                    if (sat && !err2) prn_gnss_sat2(gpx);
+                }
 
                 if (out || sat) fprintf(stdout, "\n");
 
 
                 if (gpx->option.jsn) {
                     // Print out telemetry data as JSON
-                    if ((!err && !err1 && !err3) || (!err && encrypted)) { // frame-nb/id && gps-time && gps-position  (crc-)ok; 3 CRCs, RS not needed
+                    if ( !err && ((!err1 && !err3) || !err13 || encrypted) ) { // frame-nb/id && gps-time && gps-position  (crc-)ok; 3 CRCs, RS not needed
                         // eigentlich GPS, d.h. UTC = GPS - 18sec (ab 1.1.2017)
                         char *ver_jsn = NULL;
                         if ((!first) && (gpx->option.jsn==2)) {fprintf(stdout, ",\n"); }
                         first=0;
                         fprintf(stdout, "{ \"type\": \"%s\"", "RS41");
-                        fprintf(stdout, ", \"frame\": %d, \"id\": \"%s\", \"datetime\": \"%04d-%02d-%02dT%02d:%02d:%06.3fZ\", \"lat\": %.5f, \"lon\": %.5f, \"alt\": %.5f, \"vel_h\": %.5f, \"heading\": %.5f, \"vel_v\": %.5f, \"sats\": %d, \"bt\": %d, \"batt\": %.2f",gpx->frnr, gpx->id, gpx->jahr, gpx->monat, gpx->tag, gpx->std, gpx->min, gpx->sek, gpx->lat, gpx->lon, gpx->alt, gpx->vH, gpx->vD, gpx->vV, gpx->numSV, gpx->conf_cd, gpx->batt );
-                        fprintf(stdout, ", \"pDOP\": %.1f, \"sAcc\": %.1f",gpx->pDOP,gpx->sAcc);
-
-                    if (gpx->option.ptu && !err0) {
-                            float rh = gpx->RH;
-                            if (gpx->option.ptu == 2  && gpx->RH2 > -0.5) {
-                                rh = gpx->RH2;
-                            }
+                        fprintf(stdout, ", \"frame\": %d, \"id\": \"%s\", \"datetime\": \"%04d-%02d-%02dT%02d:%02d:%06.3fZ\", \"lat\": %.5f, \"lon\": %.5f, \"alt\": %.5f, \"vel_h\": %.5f, \"heading\": %.5f, \"vel_v\": %.5f, \"sats\": %d, \"bt\": %d, \"batt\": %.2f",
+                                       gpx->frnr, gpx->id, gpx->jahr, gpx->monat, gpx->tag, gpx->std, gpx->min, gpx->sek, gpx->lat, gpx->lon, gpx->alt, gpx->vH, gpx->vD, gpx->vV, gpx->numSV, gpx->conf_cd, gpx->batt );
+                        if (gpx->option.ptu && !err0) {
+                            float _RH = gpx->RH;
+                            if (gpx->option.ptu == 2) _RH = gpx->RH2;
                             if (gpx->T > -273.0) {
                                 fprintf(stdout, ", \"temp\": %.1f",  gpx->T );
                             }
-                            if (rh > -0.5) {
-                                fprintf(stdout, ", \"humidity\": %.1f",  rh );
+                            if (_RH > -0.5) {
+                                fprintf(stdout, ", \"humidity\": %.1f",  _RH );
                             }
                             if (gpx->option.dwp) {
                                 float Td = -273.15f; // dew point Td
@@ -1964,8 +2413,8 @@ static int print_position(gpx_t *gpx, int ec) {
                             fprintf(stdout, ", \"tx_frequency\": %d", gpx->freq );
                         }
 
-                        // Reference time/position
-                        fprintf(stdout, ", \"ref_datetime\": \"%s\"", "GPS" ); // {"GPS", "UTC"} GPS-UTC=leap_sec
+                        // Reference time/position      (fw 0x50dd: datetime UTC)
+                        fprintf(stdout, ", \"ref_datetime\": \"%s\"", gpx->isUTC ? "UTC" : "GPS" ); // {"GPS", "UTC"} GPS-UTC=leap_sec
                         fprintf(stdout, ", \"ref_position\": \"%s\"", "GPS" ); // {"GPS", "MSL"} GPS=ellipsoid , MSL=geoid
 
                         #ifdef VER_JSN_STR
@@ -1999,6 +2448,7 @@ static int print_position(gpx_t *gpx, int ec) {
 
         pck = (gpx->frame[pos_PTU]<<8) | gpx->frame[pos_PTU+1];
         ofs = 0;
+        ///TODO: fw 0x50dd
 
         if (pck < 0x8000) {
             //err0 = get_PTU(gpx, 0, pck, 0);
