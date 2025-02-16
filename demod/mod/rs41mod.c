@@ -2301,8 +2301,7 @@ static int print_position(gpx_t *gpx, int ec) {
 
                 if (out && ec > 0 && pos > flen-1) fprintf(stdout, " (%d)", ec);
 
-                if (pos_aux && out && gpx->option.vbs > 1) fprintf(stdout, "\n # xdata = %s", gpx->xdata);
-				if (pos_aux) gpx->aux = get_Aux(gpx, out && gpx->option.vbs > 1, pos_aux);
+                if (pos_aux) gpx->aux = get_Aux(gpx, out && gpx->option.vbs > 1, pos_aux);
 
                 gpx->crc = 0;
                 frm_end = FRAME_LEN-2;
