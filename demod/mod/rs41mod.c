@@ -2293,7 +2293,7 @@ static int print_position(gpx_t *gpx, int ec) {
             {
                 if (pos_aux) gpx->aux = get_Aux(gpx, 0, pos_aux);
                 if (gpx->option.ptu && !sat && !encrypted && pck_ptu > 0) {
-                    err0 = get_PTU(gpx, ofs_ptu, pck_ptu, !err3);
+                    err0 = get_PTU(gpx, ofs_ptu, pck_ptu, !err3 || !err13);
                     if (!err0 && out)   prn_ptu(gpx);
                     if (gpx->option.aux && out) { 
                         float press=-1;
@@ -2465,7 +2465,10 @@ static int print_position(gpx_t *gpx, int ec) {
             err2 = get_GPS2(gpx, ofs);
             err3 = get_GPS3(gpx, ofs);
             if (!err1) Gps2Date(gpx);
-            err0 = get_PTU(gpx, 0, pck, !err3);
+
+
+            err0 = get_PTU(gpx, 0, pck, !err3);  // no err13=get_posdatetime() considered here
+
 
             if (out) {
 
